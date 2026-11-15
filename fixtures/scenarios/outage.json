@@ -1,0 +1,11 @@
+{
+  "description": "Both APIs fail: the last data stays on screen for 3 minutes, then the banner says NO DATA until they recover.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.4501, 30.5234],
+  "steps": [
+    {"at": 0,   "phase": "quiet",  "expect": {"panel": "clock", "banner": "none"}},
+    {"at": 30,  "phase": "outage", "expect": {"panel": "clock", "banner": "none"}},
+    {"at": 240, "label": "stale",  "expect": {"panel": "clock", "banner": "nodata"}},
+    {"at": 260, "phase": "quiet",  "expect": {"panel": "clock", "banner": "none"}}
+  ]
+}

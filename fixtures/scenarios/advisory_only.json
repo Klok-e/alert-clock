@@ -1,0 +1,9 @@
+{
+  "description": "An advisory track nearby is drawn on the map but does not take over the clock.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.4501, 30.5234],
+  "steps": [
+    {"at": 0,  "phase": "advisory_only", "expect": {"panel": "clock", "banner": "none", "markers_min": 1}},
+    {"at": 10, "press": "short",         "expect": {"panel": "map", "banner": "none", "markers_min": 1}}
+  ]
+}

@@ -1,0 +1,8 @@
+# PlatformIO build output (also keeps .elf/.bin/.o out of the repo's cleanup check)
+.pio/
+.vscode/
+# Local secrets: copy include/secrets.example.h to include/secrets.h
+include/secrets.h
+# Scenario frames and logs from tools/run_scenarios.py
+out/
+__pycache__/

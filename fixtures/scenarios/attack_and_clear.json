@@ -1,0 +1,16 @@
+{
+  "description": "Drones approach, the alert escalates to red, then everything clears; a short press shows the map for 30 s.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.4501, 30.5234],
+  "home_region": "м. Київ",
+  "map_radius_km": 30,
+  "watch_radius_km": 25,
+  "steps": [
+    {"at": 0,   "phase": "quiet",       "expect": {"panel": "clock", "banner": "none", "sound": "none", "markers_max": 0}},
+    {"at": 30,  "phase": "drones_near", "expect": {"panel": "map", "banner": "yellow", "sound": "raised", "markers_min": 4}},
+    {"at": 60,  "phase": "alert_red",   "expect": {"panel": "map", "banner": "red", "sound": "escalated", "markers_min": 5}},
+    {"at": 400, "phase": "quiet",       "expect": {"panel": "clock", "banner": "none", "sound": "cleared"}},
+    {"at": 410, "press": "short",       "expect": {"panel": "map", "banner": "none", "markers_max": 0}},
+    {"at": 445, "label": "map-expired", "expect": {"panel": "clock", "banner": "none"}}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "description": "A truncated threats response is rejected: the previous tracks stay until they go stale.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.4501, 30.5234],
+  "steps": [
+    {"at": 0,   "phase": "drones_near", "expect": {"panel": "map", "banner": "yellow", "threats_parse": "ok"}},
+    {"at": 20,  "phase": "malformed",   "expect": {"panel": "map", "banner": "none", "sound": "cleared", "threats_parse": "malformed"}},
+    {"at": 200, "label": "stale-map",   "expect": {"panel": "clock", "banner": "none", "threats_parse": "malformed"}}
+  ]
+}
