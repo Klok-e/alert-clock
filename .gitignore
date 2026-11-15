@@ -6,3 +6,6 @@ include/secrets.h
 # Scenario frames and logs from tools/run_scenarios.py
 out/
 __pycache__/
+# The gateway's virtualenv (gateway/install.sh) and pytest cache
+gateway/.venv/
+.pytest_cache/

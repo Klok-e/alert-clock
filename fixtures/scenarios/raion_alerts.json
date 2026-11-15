@@ -1,0 +1,15 @@
+{
+  "description": "Home in the Vyshhorod raion: the start-up notice, then oblast yellow, home raion red, another raion red (partial) and an entry without a level, which counts as red. The basemap fills the alerted raions and oblasts.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.85, 30.45],
+  "steps": [
+    {"at": 0,   "phase": "quiet",         "label": "notice", "notice": true, "expect": {"banner": "none", "sound": "none"}},
+    {"at": 5,   "label": "quiet",         "expect": {"panel": "clock", "banner": "none", "basemap": true}},
+    {"at": 10,  "phase": "oblast_yellow", "expect": {"panel": "clock", "banner": "yellow", "sound": "raised"}},
+    {"at": 15,  "press": "short",         "label": "oblast-map", "expect": {"panel": "map", "banner": "yellow", "basemap": true}},
+    {"at": 50,  "phase": "raion_red",     "expect": {"panel": "map", "banner": "red", "sound": "escalated", "markers_min": 1}},
+    {"at": 60,  "phase": "partial",       "expect": {"panel": "clock", "banner": "partial"}},
+    {"at": 65,  "press": "short",         "label": "partial-map", "expect": {"panel": "map", "banner": "partial", "basemap": true}},
+    {"at": 100, "phase": "missing_level", "expect": {"panel": "clock", "banner": "red"}}
+  ]
+}

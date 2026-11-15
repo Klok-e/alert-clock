@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecureBearSSL.h>
 
 #include <etl/string.h>
 
@@ -15,12 +14,10 @@ class EspTime final : public core::TimeSource {
   bool to_local(int64_t unix_time, core::LocalTime& out) override;
 };
 
-// Plain TCP for http:// (the mock server) and BearSSL TLS for https://, with pinned
-// root certificates and session resumption. Reads are buffered and time out after
-// kIdleTimeoutMs without data.
+// Plain TCP to the gateway. Reads are buffered and time out after kIdleTimeoutMs without data.
 class EspTransport final : public core::Transport, private core::ByteSource {
  public:
-  void begin();  // parses the trust anchors; call once in setup()
+  void begin();
 
   bool connect(const core::Url& url) override;
   bool write(const char* data, size_t length) override;
@@ -28,20 +25,29 @@ class EspTransport final : public core::Transport, private core::ByteSource {
   void close() override;
 
  private:
-  static constexpr uint32_t kIdleTimeoutMs = 8000;
-  static constexpr size_t kSessions = 2;
+  static constexpr uint32_t kIdleTimeoutMs = 5000;
+  static constexpr uint32_t kConnectTimeoutMs = 2000;  // the gateway is on the LAN
 
   int read() override;
-  BearSSL::Session* session_for(const etl::istring& host);
 
-  WiFiClient plain_;
-  BearSSL::WiFiClientSecure tls_;
-  BearSSL::X509List anchors_;
-  BearSSL::Session sessions_[kSessions];
-  etl::string<64> session_hosts_[kSessions];
-  size_t next_session_ = 0;
-  WiFiClient* active_ = nullptr;
+  WiFiClient client_;
+  bool open_ = false;
   uint8_t buffer_[256];
   size_t buffered_ = 0;
   size_t position_ = 0;
 };
+
+// The ESP8266's hardware random number generator.
+class EspRandom final : public core::Random {
+ public:
+  uint32_t next() override;
+};
+
+// The gateway address ("host" or "host:port"), kept in the emulated EEPROM sector of flash.
+namespace gateway_store {
+constexpr size_t kMaxAddress = 63;
+void begin();
+// The saved address, or "" when none is saved.
+const char* load();
+bool save(const char* address);
+}  // namespace gateway_store

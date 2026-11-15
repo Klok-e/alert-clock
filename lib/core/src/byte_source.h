@@ -5,9 +5,8 @@
 
 namespace core {
 
-// Pull-based byte input shared by the clock (TLS socket), the PC build (TCP socket) and tests.
+// Pull-based byte input shared by the clock (TCP socket), the PC build (TCP socket) and tests.
 // read() returns the next byte (0..255), or -1 at end of input or on timeout.
-// ArduinoJson reads through the same read()/readBytes() pair.
 class ByteSource {
  public:
   virtual int read() = 0;

@@ -1,8 +1,7 @@
 #pragma once
 
 // Single include point for ArduinoJson, so its configuration and warning
-// suppressions stay consistent. The ARDUINOJSON_* macros are set globally in
-// platformio.ini because they must match in every translation unit.
+// suppressions stay consistent. Only the PC scenario program uses it.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
 #pragma GCC diagnostic ignored "-Wshadow"

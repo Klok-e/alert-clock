@@ -3,24 +3,6 @@
 namespace core {
 namespace {
 
-bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
-
-AlertLevel level_from_letter(char c) {
-  switch (c) {
-    case 'N':
-      return AlertLevel::None;
-    case 'P':
-      return AlertLevel::Partial;
-    case 'Y':
-      return AlertLevel::Yellow;
-    case 'R':
-    case 'A':
-      return AlertLevel::Red;
-    default:
-      return AlertLevel::Unknown;
-  }
-}
-
 int rank(AlertLevel level) {
   switch (level) {
     case AlertLevel::Partial:
@@ -34,24 +16,6 @@ int rank(AlertLevel level) {
 }
 
 }  // namespace
-
-AlertLevel parse_iot_alert(const char* body, size_t length) {
-  if (body == nullptr) {
-    return AlertLevel::Unknown;
-  }
-  size_t begin = 0;
-  size_t end = length;
-  while (begin < end && is_space(body[begin])) {
-    ++begin;
-  }
-  while (end > begin && is_space(body[end - 1])) {
-    --end;
-  }
-  if (end - begin != 3 || body[begin] != '"' || body[begin + 2] != '"') {
-    return AlertLevel::Unknown;
-  }
-  return level_from_letter(body[begin + 1]);
-}
 
 const char* alert_level_name(AlertLevel level) {
   switch (level) {

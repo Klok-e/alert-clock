@@ -1,9 +1,7 @@
 # Gateway design
 
-Status: agreed design, not built yet. Until the
-firmware change described under "Clock firmware" lands, the clock fetches
-alerts.in.ua and NEPTUN directly over HTTPS, and `AGENTS.md` and `README.md` describe that
-firmware.
+Status: built (2026-11-15); verified on the PC against the mock server, not yet on a Pi or
+the clock. `gateway/PROTOCOL.md` holds the byte layout.
 
 A Raspberry Pi on the clock's LAN fetches every upstream source, computes what the screen needs,
 and serves it to the clock as a small signed binary snapshot. The clock keeps wall-clock time
@@ -31,8 +29,9 @@ are at https://neptun.in.ua/developers and https://neptun.in.ua/api-terms; re-re
 changing anything in this section, since both change. The developers page asks clients to poll
 REST at most once every 5 s and recommends the WebSocket stream for live use.
 
-- **Stream.** The Pi follows `wss://neptun.in.ua/api/v1/stream` for threats and alerts and sends
-  a WebSocket ping every 20 s. A missing pong for 60 s, or a closed socket, triggers a reconnect.
+- **Stream.** The Pi follows `wss://neptun.in.ua/api/v1/stream` for threats and alerts. NEPTUN
+  sends a `heartbeat` frame about every 14 s; 60 s without any frame, or a closed socket,
+  triggers a reconnect.
   Reconnect delays start at 5 s and double to a 5 min cap; a stable hour resets them.
 - **REST.** Every HTTP request to neptun.in.ua (REST endpoints and region files) goes through
   one queue that starts requests at least 5 s apart, so NEPTUN never sees more than one request
@@ -40,15 +39,14 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
   the Pi queues `/api/v1/threats` then `/api/v1/alerts`, unless they are already queued. While
   the stream is down, it queues the same pair every 30 s, so a stream outage alone never makes a
   source stale.
-- **Stream frames.** The developers page documents an alerts frame as `{data: {raions,
-  oblasts}}`, the same arrays as REST: each one replaces the alert state. The threats frame
-  format is to be confirmed from the developers page and one live session before
-  implementation, and recorded in `gateway/PROTOCOL.md`: a full snapshot replaces the track
-  state; per-track updates merge by track `id`, and each 5 min REST fetch replaces the state.
+- **Stream frames** (`{type, data}`): `alerts` (`data`: `raions` and `oblasts`, the same
+  arrays as REST) replaces the alert state; `snapshot` (`data.threats`) replaces the track
+  state; `upsert` (`data`: one track) and `remove` (`data.id`) change one track by `id`; each
+  5 min REST fetch replaces the state. Malformed frames are logged and ignored.
 - **Last good update**, per source (threats, alerts): the latest of a successful REST fetch of
-  that source, a stream frame for that source, or a pong on the current connection while that
-  source's most recent REST fetch on this connection succeeded. Pongs keep a quiet source fresh
-  between REST refreshes; a failed REST refresh stops pongs counting for that source until a
+  that source, a stream frame for that source, or a heartbeat on the current connection while
+  that source's most recent REST fetch on this connection succeeded. Heartbeats keep a quiet
+  source fresh between REST refreshes; a failed REST refresh stops them counting for that source until a
   REST fetch or a frame for it succeeds, so a connection that has stopped sending a source goes
   stale within 180 s of the next refresh failing.
 - **Stale flags.** Built into every reply as "last good update more than 180 s ago", computed per
@@ -74,25 +72,25 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
     alerts in Київська область do not count;
   - otherwise None. A stale alerts source sends Unknown.
 - **Geometry.** Home is the screen centre (120, 120); `px_per_km` is 120 / map radius. Ring
-  radii follow `choose_rings` in `lib/core/src/app.cpp` (moved to the Pi): the largest step from
+  radii follow `choose_rings` in `gateway/alert_gateway/geo.py`: the largest step from
   1, 2, 5, 10, 15, 20, 25, 50, 100 km not above a third of the map radius, and up to 3 of its
   multiples within the map radius.
 - **Tracks** from `/api/v1/threats`:
-  - tracks with status `resolved` are ignored everywhere, as today;
-  - each track's position is dead-reckoned to the reply time as `predicted_position` in
-    `lib/core/src/threats.cpp` does today: from its observed time along its velocity bearing and
-    speed, capped at 300 s; distances are from home to that position, and counts, nearest and
-    markers all use it;
+  - tracks with status `resolved` are ignored everywhere;
+  - each track's position is dead-reckoned to the reply time from its observed time along its
+    velocity bearing and speed, capped at 300 s; distances are from home to that position, and
+    counts, nearest and markers all use it;
   - counts cover every other track in the feed: `threats_in_watch` is non-advisory,
     non-`areaOnly` tracks within the watch radius; `area_only_in_region` is `areaOnly` tracks
-    whose `region` equals the home oblast feature's `region` property (`name` for `м. київ`); the nearest-track fields describe the nearest non-`areaOnly` track (advisory or not,
-    with its advisory flag);
+    whose `regionKey` equals the home oblast's key, or whose `region` equals the home oblast
+    feature's `region` property (`name` for `м. київ`); the nearest-track fields describe the
+    nearest non-`areaOnly` track within 1.5 × the map radius (advisory or not, with its
+    advisory flag);
   - markers: non-`areaOnly` tracks are projected to signed 16-bit screen pixels; those more than
     24 px outside the screen are dropped; the 24 nearest of the rest are sent. Each carries the
     newest 6 points of NEPTUN's `trail` field timestamped within 5 min before the reply time,
-    also projected, and an uncertainty radius computed as today (`build_view` in
-    `lib/core/src/app.cpp`: approximate tracks only, `uncertaintyKm` × `px_per_km`, capped at
-    200 px). The clock clips what it draws;
+    also projected, and an uncertainty radius (approximate tracks only, `uncertaintyKm` ×
+    `px_per_km`, capped at 200 px). The clock clips what it draws;
   - a marker's `stale` flag is NEPTUN's per-track status `stale` (drawn faded); it is unrelated
     to the per-source stale flags;
   - `areaOnly` tracks are never drawn, given a distance or a heading. Advisory tracks are drawn
@@ -100,20 +98,21 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
 
 ## Wire protocol (clock ↔ Pi)
 
-The byte layout is to be written in `gateway/PROTOCOL.md`, with sample messages in
-`fixtures/wire/` that a C++ test (`test/test_wire`) and a pytest both decode and re-encode.
+The byte layout is in `gateway/PROTOCOL.md`. `tools/make_wire_fixtures.py` encodes sample
+messages with the Python encoder into `test/wire_fixtures.h`; the C++ tests decode them, and a
+pytest fails while that file is out of date with the encoder.
 
 - The gateway listens on `0.0.0.0:8080`. The clock sends `GET /v1/snapshot?n=<nonce>` every 2 s;
   the nonce is a fresh 32-bit value from the ESP8266 hardware RNG (`RANDOM_REG32`).
 - Replies are little-endian, fixed layout, starting with a version byte, and end with an
   HMAC-SHA256 over everything before it, which includes the echoed nonce. The clock rejects a
-  reply with a bad MAC, a different nonce or an unknown version, and checks the MAC with
-  BearSSL's HMAC, which needs no heap.
-- A snapshot carries: the alert level; both stale flags; the
+  reply with a bad MAC, a different nonce or an unknown version, and checks the MAC with its
+  own SHA-256 in `lib/core/src/sha256.cpp`, which needs no heap.
+- A snapshot carries: the alert level; both stale flags and both sources' ages; the
   basemap version; the map scale (`px_per_km`) and up to 3 ring radii in km; the counts and
   nearest-track fields (distance, kind, heading, advisory, stale); and up to 24 markers, each
   with x, y, heading, kind, flags (approximate, stale, advisory), uncertainty radius in pixels
-  and up to 6 trail points. A whole reply fits in 1.5 KB.
+  and up to 6 trail points. A whole reply is at most 881 bytes and fits the clock's 1 KB buffer.
 - `GET /v1/basemap?n=<nonce>` returns the basemap message (header with version and palette, row
   table, rows, MAC), at most 16,384 bytes in all. The basemap version is the CRC-32 of the
   encoded rows and palette, so any content change, including a Pi restart or a late Overpass
@@ -132,7 +131,8 @@ The byte layout is to be written in `gateway/PROTOCOL.md`, with sample messages 
   ground, red fill, yellow fill, water, roads, borders, labels; the rest are spare.
 - **Fills.** Each raion takes the more severe of its own entry and its oblast's entry; an oblast
   entry fills all of that oblast's raions; Kyiv city is one polygon filled from its oblast
-  entry. While the alerts source is stale, nothing is filled.
+  entry. Partial has no fill of its own: only the alerted raions are filled. While the alerts
+  source is stale, nothing is filled.
 - **Sources.** Borders and fills come from NEPTUN's region files. Water, roads and place names
   come from one Overpass query, cached on disk under a hash of the config and repeated only
   when the config changes; with no cache and Overpass unreachable, the basemap goes out without
@@ -155,11 +155,14 @@ The byte layout is to be written in `gateway/PROTOCOL.md`, with sample messages 
 - **Removed:** TLS and the root certificates, the NEPTUN and alerts.in.ua parsers, `geo`,
   ArduinoJson and its parse arena, the alerts token, the compile-time home and radius settings.
   Their logic and tests move to Python.
-- **Added, as static buffers:** a 1.5 KB reply buffer and a 16,384-byte basemap buffer that
+- **Added, as static buffers:** a 1,024-byte reply buffer and a 16,384-byte basemap buffer that
   holds the whole basemap message; plus the gateway source (HTTP every 2 s, nonce, MAC check) and a
   per-strip RLE decoder.
 - **Freshness.** With no valid reply for 60 s, the clock treats both sources as stale: NoData
   banner, map data shown as old. Otherwise the Pi's stale flags decide.
+- **Retries.** A failed connection can block the clock's loop for seconds, so after a failed
+  poll the next comes 10 s later instead of 2 s, and a failed basemap download is retried after
+  30 s; a long press or `POST /debug/refresh` polls at once.
 - **Gateway address.** Entered on the `/wifi` page as `host` or `host:port` (default port 8080)
   and saved in flash.
 - **Inputs.** A long press and `POST /debug/refresh` poll the gateway at once.
@@ -167,12 +170,12 @@ The byte layout is to be written in `gateway/PROTOCOL.md`, with sample messages 
   `/debug/state` reports heap, the gateway source's last outcome, successes, failures, MAC or
   nonce rejections and seconds since the last valid reply, and the basemap version and
   validity.
-- **Screens.** All text is Ukrainian, in Inter converted with Adafruit GFX `fontconvert` to GFX
-  fonts in `lib/ui/src/fonts/`, holding ASCII and the Ukrainian Cyrillic letters (А–я, Ґґ, Єє,
-  Іі, Її), plus `·` (U+00B7), `©` (U+00A9) and the apostrophes `’` (U+2019) and `ʼ` (U+02BC),
-  kept in flash. The map footer has two
-  lines: the legend, then "дані: neptun.in.ua · неофіційно · © OpenStreetMap"; the clock face
-  shows the same credit line. At start-up the clock shows "Неофіційне джерело. Орієнтуйтеся на
+- **Screens.** All text is Ukrainian, in Inter converted by `tools/make_fonts.py` (Pillow) to
+  GFX fonts in `lib/ui/src/fonts.cpp`, holding ASCII and the Ukrainian Cyrillic letters (А–я,
+  Ґґ, Єє, Іі, Її), plus `·` (U+00B7), `©` (U+00A9) and the apostrophe `ʼ` (U+02BC), kept in
+  flash. The credit does not fit one 240-pixel line, so it takes two: "неофіційне джерело",
+  then "дані: neptun.in.ua · © OpenStreetMap". On the map the first line shares the footer's
+  top line with the legend, at its right; on the clock face both lines are centred. At start-up the clock shows "Неофіційне джерело. Орієнтуйтеся на
   офіційні сигнали тривоги." for 4 s. NEPTUN's terms §3 (a visible link next to its data) and §5
   (state that it is unofficial and refer users to official signals) require these.
 - **RAM.** The last build with HTTPS used 42,092 bytes of static RAM. Removing HTTPS-era state
@@ -197,26 +200,12 @@ REST, alert phases for home raion red, home oblast yellow, partial, missing `lev
 city, plus small synthetic region files) and a fake Overpass. Scenarios run the whole path: fake
 upstream → the real gateway → the native clock build → PNG frames. `tools/run_scenarios.py`
 writes a gateway config from the scenario's `home` and radii, starts the gateway on a free port
-with `--test`, and sets its time at each step through `POST /_test/time?unix=<s>`, an endpoint
-that exists only under `--test`; the gateway reads time only through that injectable clock. Unit tests on both sides
-cover the wire samples, the MAC and nonce checks and RLE round trips; `pytest gateway/tests`
-runs the gateway's.
-
-## AGENTS.md and README.md changes
-
-Make these in the change that removes HTTPS from the firmware, not before: until then the HTTPS
-peak still needs the current limits.
-
-- AGENTS.md Verification: add `pytest gateway/tests` as a step; raise the `RAM:` limit from
-  43,000 to 57,000 bytes.
-- AGENTS.md "On the clock": after `POST /debug/refresh`, `heap.free` ≥ 12,000 replaces the
-  `heap.max_block` and `threats.arena_high_water` checks; `POST /debug/sources?gateway=...`
-  replaces the `threats=`/`alerts=` form for pointing the clock at a test gateway.
-- AGENTS.md Rules: the ArduinoJson rules (`core::ArenaAllocator`, `json.h`) leave with
-  ArduinoJson; "reach the real APIs only from the clock" becomes "only from the gateway".
-- README.md: rewrite setup (Pi install, gateway address on `/wifi`, key in `secrets.h`, no
-  alerts.in.ua token), "what it shows" (Ukrainian text, raion fills, trails), the RAM paragraph,
-  data sources and terms (NEPTUN only, OpenStreetMap via Overpass) and the status list.
+with `--test`, and sets its time at each step through `GET /_test/time?unix=<s>`, an endpoint
+that exists only under `--test`; it also makes the gateway fetch NEPTUN's REST endpoints and,
+the first time, Overpass at once, so frames do not depend on timing. The gateway reads time
+only through that injectable clock. Unit tests on both sides cover the wire samples, the MAC
+and nonce checks, row validation and the alert rules; `python3 -m pytest gateway/tests` runs
+the gateway's.
 
 ## Facts checked 2026-11-15
 

@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <ctime>
+#include <random>
 
 namespace {
 
@@ -29,6 +30,11 @@ bool FakeTime::to_local(int64_t unix_time, core::LocalTime& out) {
   out.second = static_cast<uint8_t>(local.tm_sec);
   out.weekday = static_cast<uint8_t>(local.tm_wday);
   return true;
+}
+
+uint32_t HostRandom::next() {
+  static std::random_device device;
+  return device();
 }
 
 SocketTransport::~SocketTransport() { close(); }
@@ -110,10 +116,12 @@ void SocketTransport::close() {
   position_ = 0;
 }
 
-int http_get_status(const std::string& url_text) {
+int http_get_status(const std::string& url_text, const char* query) {
   core::Url url;
   core::RequestBuffer request;
-  if (!core::parse_url(url_text.c_str(), url) || !core::build_get_request(url, {}, request)) {
+  core::RequestOptions options;
+  options.query = query;
+  if (!core::parse_url(url_text.c_str(), url) || !core::build_get_request(url, options, request)) {
     return -1;
   }
   SocketTransport transport;

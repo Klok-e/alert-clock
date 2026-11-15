@@ -21,22 +21,18 @@ struct Url {
 bool parse_url(const char* text, Url& out);
 
 struct RequestOptions {
-  const char* bearer_token = nullptr;  // alerts.in.ua token, sent as a header to keep it out of URLs
-  const char* if_none_match = nullptr;
-  const char* if_modified_since = nullptr;
+  const char* query = nullptr;  // appended after "?", e.g. "n=0a1b2c3d"
 };
 
-using RequestBuffer = etl::string<512>;
+using RequestBuffer = etl::string<256>;
 
 // Builds an HTTP/1.0 GET with "Connection: close", so servers never reply chunked.
-// Returns false if it does not fit or a header value contains control characters.
+// Returns false if it does not fit or the query holds anything but printable ASCII.
 bool build_get_request(const Url& url, const RequestOptions& options, RequestBuffer& out);
 
 struct ResponseHead {
   int status = 0;
-  etl::string<96> etag;           // empty when absent, too long, or unsafe to echo back
-  etl::string<48> last_modified;  // same
-  int32_t content_length = -1;    // -1 when absent
+  int32_t content_length = -1;  // -1 when absent
 };
 
 enum class HeadResult : uint8_t { Ok, Closed, Malformed };

@@ -5,17 +5,15 @@
 
 namespace core {
 
-// alerts.in.ua v2 IoT statuses for one region.
+// The home region's alert level, as the gateway computes it from NEPTUN (the values are
+// also the wire encoding: gateway/PROTOCOL.md).
 enum class AlertLevel : uint8_t {
   Unknown,  // no valid data
-  None,     // "N"
-  Partial,  // "P": alert in part of the region
-  Yellow,   // "Y": preliminary threat
-  Red,      // "R" (and v1 "A"): air-raid alert
+  None,     // no alert at home
+  Partial,  // alerts elsewhere in the home oblast
+  Yellow,   // threat warning at home
+  Red,      // air-raid alert at home
 };
-
-// Parses a v2 IoT body: a JSON string holding one status letter, e.g. "R".
-AlertLevel parse_iot_alert(const char* body, size_t length);
 
 const char* alert_level_name(AlertLevel level);
 bool is_alerting(AlertLevel level);

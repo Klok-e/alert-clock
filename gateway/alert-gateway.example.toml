@@ -1,0 +1,26 @@
+# alert-gateway settings. install.sh copies this to /etc/alert-gateway.toml and fills in
+# hmac_key. After editing: sudo systemctl restart alert-gateway
+
+[home]
+# Map centre. The gateway finds your raion and oblast from these coordinates.
+lat = 50.4501
+lon = 30.5234
+
+[map]
+radius_km = 30        # half the screen width
+watch_radius_km = 25  # non-advisory tracks inside switch the clock to the map
+
+[gateway]
+listen = "0.0.0.0"
+port = 8080
+# 64 hex characters; the clock's include/secrets.h needs the same value as CLOCK_GATEWAY_KEY.
+hmac_key = "REPLACE_WITH_64_HEX_CHARACTERS"
+cache_dir = "/var/cache/alert-gateway"
+# Inter, for basemap labels (Debian/Raspberry Pi OS package: fonts-inter).
+label_font = "/usr/share/fonts/opentype/inter/Inter-Regular.otf"
+
+[upstream]
+neptun = "https://neptun.in.ua"
+neptun_stream = "wss://neptun.in.ua/api/v1/stream"
+overpass = "https://overpass-api.de/api/interpreter"
+user_agent = "alert-gateway (alert-clock)"

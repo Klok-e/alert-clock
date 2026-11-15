@@ -8,6 +8,8 @@
 #include "board.h"
 #include "config.h"
 #include "esp_platform.h"
+#include "flash.h"
+#include "fonts.h"
 #include "outputs.h"
 #include "safe_mode.h"
 #include "scene.h"
@@ -23,18 +25,15 @@ constexpr uint32_t kHealthyAfterMs = 60000;
 constexpr uint8_t kRotation = 0;    // check on the device; the supplier stores it in EEPROM
 constexpr uint8_t kBrightness = 80;  // percent
 
+constexpr uint32_t kNoticeMs = 4000;
+
 core::Settings make_settings() {
   core::Settings settings;
-  settings.home = core::LatLon{CLOCK_HOME_LAT, CLOCK_HOME_LON};
-  settings.home_region = CLOCK_HOME_REGION;
-  settings.map_radius_km = CLOCK_MAP_RADIUS_KM;
-  settings.watch_radius_km = CLOCK_WATCH_RADIUS_KM;
-  settings.alerts_url =
-      "https://api.alerts.in.ua/v2/iot/active_air_raid_alerts/" CLOCK_ALERTS_REGION_UID ".json";
-  settings.alerts_token = CLOCK_ALERTS_TOKEN;
+  core::parse_key_hex(CLOCK_GATEWAY_KEY, settings.key);
   return settings;
 }
 
+static_assert(sizeof(CLOCK_GATEWAY_KEY) - 1 == 64, "CLOCK_GATEWAY_KEY must be 64 hex digits");
 static_assert(sizeof(CLOCK_ADMIN_PASSWORD) - 1 >= 8,
               "CLOCK_ADMIN_PASSWORD must have 8+ characters: it is also the setup network's WPA2 key");
 
@@ -44,13 +43,16 @@ uint16_t band_pixels[core::kScreenPx * ui::kBandHeight];  // RGB565
 lgfx::LGFX_Sprite band(&display);
 EspTime time_source;
 EspTransport transport;
-core::App app(make_settings(), time_source, transport);
+EspRandom random_source;
+core::App app(make_settings(), time_source, transport, random_source);
 core::ViewModel view;
 core::ButtonDetector button;
 Outputs outputs;
 SafeMode safe_mode;
 Service service(app, view, safe_mode);
 uint32_t last_frame_ms = 0;
+uint32_t notice_from_ms = 0;  // the start-up notice shows for kNoticeMs from here
+bool notice_done = false;
 bool setup_network_up = false;
 
 // Container overflows and out-of-range indexes end here instead of corrupting memory.
@@ -62,14 +64,24 @@ void on_etl_error(const etl::exception& error) {
   abort();
 }
 
+// Start-up messages, in flash (plain literals occupy RAM on the ESP8266).
+const char kConnecting[] PROGMEM = "Підключення до Wi-Fi";
+const char kSetupTitle[] PROGMEM = "Налаштування Wi-Fi";
+const char kSetupDetail[] PROGMEM = "AlertClock-Setup 192.168.4.1/wifi";
+const char kConnected[] PROGMEM = "Wi-Fi підключено";
+const char kSafeMode[] PROGMEM = "Безпечний режим";
+
+// `title` is in flash, `detail` in RAM.
 void show_message(const char* title, const char* detail) {
+  char text[64];
+  ui::flash_copy(text, sizeof(text), title);
   display.startWrite();
   display.fillScreen(0);
   display.setTextDatum(lgfx::textdatum_t::middle_center);
   display.setTextColor(0xFFFF);
-  display.setFont(&lgfx::fonts::FreeSansBold9pt7b);
-  display.drawString(title, core::kScreenPx / 2, 100);
-  display.setFont(&lgfx::fonts::Font2);
+  display.setFont(&ui::kInterTitle);
+  display.drawString(text, core::kScreenPx / 2, 100);
+  display.setFont(&ui::kInterBody);
   display.drawString(detail, core::kScreenPx / 2, 135);
   display.endWrite();
 }
@@ -96,16 +108,20 @@ void connect_wifi() {
   }
   WiFi.mode(WIFI_AP_STA);
   setup_network_up = WiFi.softAP(kSetupNetwork, CLOCK_ADMIN_PASSWORD);
-  show_message("Wi-Fi setup", "AlertClock-Setup 192.168.4.1/wifi");
+  char detail[48];
+  ui::flash_copy(detail, sizeof(detail), kSetupDetail);
+  show_message(kSetupTitle, detail);
 }
 
-// Shows the clock's address on screen and the serial log; uploads and /debug need it.
+// `title` is in flash. Shows the clock's address on screen and the serial log; uploads and /debug need it.
 void show_address(const char* title) {
   char text[24];
   const IPAddress ip = WiFi.localIP();
   snprintf(text, sizeof(text), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
   show_message(title, text);
-  Serial.printf("%s: %s\n", title, text);
+  char title_text[48];
+  ui::flash_copy(title_text, sizeof(title_text), title);
+  Serial.printf("%s: %s\n", title_text, text);
 }
 
 }  // namespace
@@ -122,19 +138,25 @@ void setup() {
   outputs.set_backlight(kBrightness);
   band.setBuffer(band_pixels, core::kScreenPx, ui::kBandHeight, 16);
 
-  show_message("Connecting Wi-Fi", "");
+  show_message(kConnecting, "");
   connect_wifi();
   configTime(kTimeZone, "pool.ntp.org", "time.google.com");
   transport.begin();
+  gateway_store::begin();
+  if (!app.set_gateway(gateway_store::load())) {
+    Serial.println("No gateway address: set it on /wifi.");
+  }
   service.begin(CLOCK_ADMIN_PASSWORD);
 
   if (safe_mode.active()) {
-    show_address("SAFE MODE");
+    show_address(kSafeMode);
     Serial.println("Safe mode after repeated crashes: only Wi-Fi, firmware upload and /debug run.");
   } else if (WiFi.status() == WL_CONNECTED) {
-    show_address("Wi-Fi connected");
+    show_address(kConnected);
     delay(1500);  // long enough to read the address
   }
+  notice_from_ms = millis();
+  last_frame_ms = notice_from_ms - kFrameMs;
 }
 
 void loop() {
@@ -169,6 +191,10 @@ void loop() {
   if (after - last_frame_ms >= kFrameMs) {
     last_frame_ms = after;
     app.build_view(view);
+    if (!notice_done && after - notice_from_ms >= kNoticeMs) {
+      notice_done = true;
+    }
+    view.notice = !notice_done;
     ui::render(display, band, view);
     outputs.show_banner(view.banner);
   }

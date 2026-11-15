@@ -1,8 +1,8 @@
 {
-  "description": "An 800-track national feed streams through the fixed parse arena; only the nearby tracks are kept.",
+  "description": "An 800-track national feed: the gateway sends the clock only the 2 tracks on its map.",
   "start": "2026-11-14T19:00:00Z",
   "home": [50.4501, 30.5234],
   "steps": [
-    {"at": 0, "phase": "big_feed", "expect": {"panel": "map", "banner": "red", "sound": "none", "markers_min": 2, "markers_max": 2, "threats_parse": "ok"}}
+    {"at": 0, "phase": "big_feed", "expect": {"panel": "map", "banner": "red", "sound": "none", "markers_min": 2, "markers_max": 2}}
   ]
 }

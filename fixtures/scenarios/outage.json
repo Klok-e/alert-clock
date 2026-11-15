@@ -1,5 +1,5 @@
 {
-  "description": "Both APIs fail: the last data stays on screen for 3 minutes, then the banner says NO DATA, the map says its data is old, until they recover.",
+  "description": "NEPTUN fails: the gateway keeps its last data for 3 minutes, then marks both sources stale; the banner says no data and the map says its data is old until NEPTUN recovers.",
   "start": "2026-11-14T19:00:00Z",
   "home": [50.4501, 30.5234],
   "steps": [

@@ -21,15 +21,6 @@ bool is_host_char(char c) {
 // Printable ASCII except space: safe in a request line or header value.
 bool is_visible(char c) { return c > 0x20 && c < 0x7f; }
 
-bool is_safe_header_value(const char* value) {
-  for (const char* p = value; *p != '\0'; ++p) {
-    if (!is_visible(*p) && *p != ' ') {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool append(RequestBuffer& out, const char* text) {
   const size_t length = std::strlen(text);
   if (length > out.available()) {
@@ -37,16 +28,6 @@ bool append(RequestBuffer& out, const char* text) {
   }
   out.append(text, length);
   return true;
-}
-
-bool append_header(RequestBuffer& out, const char* name, const char* value) {
-  if (value == nullptr || *value == '\0') {
-    return true;
-  }
-  if (!is_safe_header_value(value)) {
-    return false;
-  }
-  return append(out, name) && append(out, ": ") && append(out, value) && append(out, "\r\n");
 }
 
 char to_lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
@@ -91,22 +72,6 @@ LineResult read_line(ByteSource& in, Line& line) {
     line.pop_back();
   }
   return LineResult::Ok;
-}
-
-template <size_t N>
-void store_if_safe(etl::string<N>& target, const Line& line, size_t begin) {
-  target.clear();
-  const size_t length = line.size() - begin;
-  if (length > target.capacity()) {
-    return;
-  }
-  for (size_t i = begin; i < line.size(); ++i) {
-    if (!is_visible(line[i]) && line[i] != ' ') {
-      target.clear();
-      return;
-    }
-    target.push_back(line[i]);
-  }
 }
 
 bool parse_content_length(const Line& line, size_t begin, int32_t& out) {
@@ -185,8 +150,20 @@ bool parse_url(const char* text, Url& out) {
 
 bool build_get_request(const Url& url, const RequestOptions& options, RequestBuffer& out) {
   out.clear();
-  if (!append(out, "GET ") || !append(out, url.path.c_str()) ||
-      !append(out, " HTTP/1.0\r\nHost: ") || !append(out, url.host.c_str())) {
+  if (!append(out, "GET ") || !append(out, url.path.c_str())) {
+    return false;
+  }
+  if (options.query != nullptr && *options.query != '\0') {
+    for (const char* p = options.query; *p != '\0'; ++p) {
+      if (!is_visible(*p)) {
+        return false;
+      }
+    }
+    if (!append(out, "?") || !append(out, options.query)) {
+      return false;
+    }
+  }
+  if (!append(out, " HTTP/1.0\r\nHost: ") || !append(out, url.host.c_str())) {
     return false;
   }
   const uint16_t default_port = url.tls ? 443 : 80;
@@ -204,18 +181,7 @@ bool build_get_request(const Url& url, const RequestOptions& options, RequestBuf
       return false;
     }
   }
-  if (!append(out, "\r\nUser-Agent: alert-clock/0.1\r\nAccept: application/json\r\n"
-                   "Connection: close\r\n")) {
-    return false;
-  }
-  if (options.bearer_token != nullptr && *options.bearer_token != '\0') {
-    if (!is_safe_header_value(options.bearer_token) || !append(out, "Authorization: Bearer ") ||
-        !append(out, options.bearer_token) || !append(out, "\r\n")) {
-      return false;
-    }
-  }
-  return append_header(out, "If-None-Match", options.if_none_match) &&
-         append_header(out, "If-Modified-Since", options.if_modified_since) && append(out, "\r\n");
+  return append(out, "\r\nUser-Agent: alert-clock/0.2\r\nConnection: close\r\n\r\n");
 }
 
 HeadResult read_response_head(ByteSource& in, ResponseHead& head) {
@@ -266,11 +232,7 @@ HeadResult read_response_head(ByteSource& in, ResponseHead& head) {
       --end;
     }
     line.resize(end);
-    if (name_equals(line, colon, "etag")) {
-      store_if_safe(head.etag, line, value);
-    } else if (name_equals(line, colon, "last-modified")) {
-      store_if_safe(head.last_modified, line, value);
-    } else if (name_equals(line, colon, "content-length")) {
+    if (name_equals(line, colon, "content-length")) {
       if (!parse_content_length(line, value, head.content_length)) {
         return HeadResult::Malformed;
       }

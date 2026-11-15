@@ -3,23 +3,21 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <etl/string.h>
-
 #include "alerts.h"
 #include "button.h"
 #include "http.h"
 #include "screen.h"
-#include "threats.h"
 #include "view.h"
+#include "wire.h"
 
 namespace core {
 
-// A byte pipe to one server. The clock wraps WiFiClient/BearSSL, the PC build wraps sockets.
+// A byte pipe to one server. The clock wraps WiFiClient, the PC build wraps sockets.
 class Transport {
  public:
-  virtual bool connect(const Url& url) = 0;  // TLS when url.tls
+  virtual bool connect(const Url& url) = 0;
   virtual bool write(const char* data, size_t length) = 0;
-  virtual ByteSource& input() = 0;           // response bytes; -1 at close or timeout
+  virtual ByteSource& input() = 0;  // response bytes; -1 at close or timeout
   virtual void close() = 0;
 
  protected:
@@ -36,19 +34,23 @@ class TimeSource {
   ~TimeSource() = default;
 };
 
-// Strings are not copied: every pointer must outlive the App (use literals or statics).
+// Unpredictable 32-bit values for request nonces.
+class Random {
+ public:
+  virtual uint32_t next() = 0;
+
+ protected:
+  ~Random() = default;
+};
+
 struct Settings {
-  LatLon home;
-  const char* home_region = nullptr;  // oblast name as NEPTUN spells it; optional
-  float map_radius_km = 30.0f;        // half the screen width
-  float watch_radius_km = 25.0f;      // tracks inside switch the clock to the map
-  const char* threats_url = "https://neptun.in.ua/api/v1/threats";
-  const char* alerts_url = nullptr;   // alerts.in.ua v2 IoT URL for one region; nullptr disables
-  const char* alerts_token = nullptr;
-  uint32_t threats_period_ms = 15000;  // raised to 5 s if lower (NEPTUN's limit)
-  uint32_t alerts_period_ms = 20000;   // raised to 7.5 s if lower (alerts.in.ua: 8 a minute)
-  uint32_t fresh_for_ms = 180000;      // older data counts as missing
-  uint32_t map_request_ms = 30000;     // how long a short press keeps the map up
+  GatewayKey key = {};
+  uint32_t poll_ms = 2000;
+  // After a failed poll or basemap download: each failure can block the loop for seconds.
+  uint32_t retry_ms = 10000;
+  uint32_t basemap_retry_ms = 30000;
+  uint32_t silent_ms = 60000;      // no valid reply for this long: both sources count as stale
+  uint32_t map_request_ms = 30000;  // how long a short press keeps the map up
 };
 
 enum class Sound : uint8_t { None, AlertRaised, AlertEscalated, AlertCleared };
@@ -57,92 +59,86 @@ const char* sound_name(Sound sound);
 enum class FetchOutcome : uint8_t {
   None,
   Ok,
-  NotModified,
+  NotConfigured,
   ConnectFailed,
   RequestFailed,
   BadHead,
   HttpError,
-  ParseFailed,
+  TooLarge,
+  Truncated,
+  Rejected,  // MAC, version, type, nonce or structure; see last_rejection
 };
 const char* fetch_outcome_name(FetchOutcome outcome);
 
-struct SourceStatus {
+struct GatewayStatus {
   FetchOutcome last_outcome = FetchOutcome::None;
   int last_http_status = 0;
+  WireResult last_rejection = WireResult::Ok;
   uint32_t successes = 0;
   uint32_t failures = 0;
-  uint8_t consecutive_failures = 0;
-  bool ever_succeeded = false;
-  bool expired = false;  // latched once the data outlives fresh_for_ms; cleared by a success
-  uint32_t last_success_ms = 0;
-  uint32_t next_due_ms = 0;
+  uint32_t rejections = 0;
+  bool ever_valid = false;
+  bool silent = true;  // latched once silent_ms passes without a valid reply
+  uint32_t last_valid_ms = 0;
 };
 
 class App {
  public:
-  App(const Settings& settings, TimeSource& time, Transport& transport);
+  App(const Settings& settings, TimeSource& time, Transport& transport, Random& random);
 
-  // Runs at most one network fetch per call; nothing is fetched until the clock is set.
+  // Runs at most one request per call: a pending basemap, else a due snapshot.
   void tick();
   void press(ButtonEvent event);
-  // Brings both fetches forward, but never closer than each API's minimum interval to the
-  // previous request, and never into the wait after a 429.
+  // Polls the gateway at the next tick, even while backing off after a failure.
   void refresh_now();
-  // Points the sources elsewhere, e.g. at the mock server. False (and no change) if a URL
-  // is invalid. nullptr leaves that source unchanged.
-  bool set_urls(const char* threats_url, const char* alerts_url);
+  // "host" or "host:port" (default port 8080). False, and no change, if it is invalid.
+  bool set_gateway(const char* address);
+  bool gateway_configured() const { return configured_; }
   void build_view(ViewModel& view);
   // The pending sound, cleared by reading it.
   Sound take_sound();
 
-  const Settings& settings() const { return settings_; }
-  const SourceStatus& threats_status() const { return threats_.status; }
-  const SourceStatus& alerts_status() const { return alerts_.status; }
-  const ThreatSnapshot& threats() const { return snapshot_; }
-  AlertLevel alert_level() const { return alert_level_; }
-  ThreatParse last_threat_parse() const { return last_parse_; }
+  const GatewayStatus& status() const { return status_; }
+  const Snapshot& snapshot() const { return snapshot_; }
+  const Basemap& basemap() const { return basemap_; }
+  // Seconds since the last valid reply; kNever before the first.
+  uint32_t since_valid_s();
 
  private:
-  struct Source {
-    Url url;
-    bool configured = false;
-    bool forced = false;          // a refresh was requested
-    bool requested = false;       // a request has been sent at least once
-    uint32_t last_request_ms = 0;
-    uint32_t min_interval_ms = 0;  // the API's limit between requests
-    etl::string<96> etag;
-    etl::string<48> last_modified;
-    uint64_t success_uptime_ms = 0;  // for the shown age, which must not wrap like millis()
-    SourceStatus status;
-  };
+  enum class Request : uint8_t { Snapshot, Basemap };
 
-  // millis() extended to 64 bits; each call must come within ~49.7 days of the previous one.
   uint64_t advance_uptime();
-
-  bool due(const Source& source, uint32_t now) const;
-  bool fresh(const Source& source, uint32_t now) const;
-  void expire_if_old(Source& source, uint32_t now);
-  void record(Source& source, FetchOutcome outcome, uint32_t period_ms);
-  FetchOutcome fetch(Source& source, bool threats);
-  FetchOutcome read_alert(ByteSource& body);
-  FetchOutcome read_threats(ByteSource& body);
+  bool recent(uint32_t now) const;
+  FetchOutcome fetch(Request request);
+  void accept_snapshot();
 
   Settings settings_;
   TimeSource& time_;
   Transport& transport_;
-  Source threats_;
-  Source alerts_;
+  Random& random_;
+  Url snapshot_url_;
+  Url basemap_url_;
+  bool configured_ = false;
+  bool forced_ = false;
+  bool requested_ = false;
+  bool basemap_wanted_ = false;
+  bool last_poll_failed_ = false;
+  bool basemap_failed_ = false;
+  uint32_t basemap_failed_at_ = 0;
+  uint32_t last_request_ms_ = 0;
   RequestBuffer request_;
-  ThreatSnapshot snapshot_;
-  ThreatSnapshot incoming_;
-  ThreatParse last_parse_ = ThreatParse::Ok;
-  AlertLevel alert_level_ = AlertLevel::Unknown;
+  GatewayStatus status_;
+  Snapshot snapshot_;
+  Basemap basemap_;
   AlertTracker tracker_;
   Sound pending_sound_ = Sound::None;
   bool map_requested_ = false;
   uint32_t map_requested_at_ = 0;
   uint64_t uptime_ms_ = 0;
   uint32_t uptime_millis_ = 0;
+  uint64_t valid_uptime_ms_ = 0;
+  uint8_t reply_[kMaxSnapshotBytes];
+  uint8_t basemap_body_[kMaxBasemapBytes];
 };
 
 }  // namespace core

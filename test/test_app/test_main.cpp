@@ -1,10 +1,13 @@
-// Fetch scheduling against a scripted server.
+// The App's gateway polling against a scripted gateway serving messages from the
+// gateway's own encoder (test/wire_fixtures.h).
 
 #include <unity.h>
 
+#include <deque>
 #include <string>
 #include <vector>
 
+#include "../wire_fixtures.h"
 #include "app.h"
 
 using namespace core;
@@ -14,48 +17,77 @@ namespace {
 class FakeTime final : public TimeSource {
  public:
   uint32_t now_ms = 1000;
-  int64_t now_unix = 1794683949;
 
   uint32_t millis() override { return now_ms; }
-  int64_t unix_time() override { return now_unix; }
+  int64_t unix_time() override { return 0; }
   bool to_local(int64_t, LocalTime&) override { return false; }
 
-  void advance_s(uint32_t seconds) {
-    now_ms += seconds * 1000;
-    now_unix += seconds;
-  }
+  void advance_s(uint32_t seconds) { now_ms += seconds * 1000; }
 };
 
-// Answers each request with the next scripted response; the last one repeats.
-class ScriptedServer final : public Transport {
+// The gateway signs with the nonce the clock sends; the fixtures were signed with this one.
+class FixedRandom final : public Random {
  public:
-  explicit ScriptedServer(std::vector<std::string> responses) : responses_(std::move(responses)) {}
+  uint32_t next() override { return fixtures::kNonce; }
+};
 
-  bool connect(const Url&) override { return true; }
+std::string ok_reply(const uint8_t* body, size_t length) {
+  return "HTTP/1.0 200 OK\r\nContent-Length: " + std::to_string(length) + "\r\n\r\n" +
+         std::string(reinterpret_cast<const char*>(body), length);
+}
+
+// Answers /v1/snapshot and /v1/basemap from separate scripts; each script's last reply
+// repeats. An empty script refuses the connection.
+class ScriptedGateway final : public Transport {
+ public:
+  std::deque<std::string> snapshots;
+  std::deque<std::string> basemaps;
+  std::vector<std::string> requests;
+
+  bool connect(const Url& url) override {
+    std::deque<std::string>& script = url.path == "/v1/basemap" ? basemaps : snapshots;
+    if (script.empty()) {
+      return false;
+    }
+    current_ = script.front();
+    if (script.size() > 1) {
+      script.pop_front();
+    }
+    source_ = MemorySource(current_.data(), current_.size());
+    return true;
+  }
   bool write(const char* data, size_t length) override {
     requests.emplace_back(data, length);
-    const size_t index = requests.size() - 1 < responses_.size() ? requests.size() - 1 : responses_.size() - 1;
-    current_ = responses_[index];
-    source_ = MemorySource(current_.data(), current_.size());
     return true;
   }
   ByteSource& input() override { return source_; }
   void close() override {}
 
-  std::vector<std::string> requests;
+  int count(const char* path) const {
+    int n = 0;
+    for (const std::string& request : requests) {
+      n += request.find(path) != std::string::npos ? 1 : 0;
+    }
+    return n;
+  }
 
  private:
-  std::vector<std::string> responses_;
   std::string current_;
   MemorySource source_{"", 0};
 };
 
-Settings alerts_only() {
+Settings test_settings() {
   Settings settings;
-  settings.threats_url = nullptr;
-  settings.alerts_url = "http://mock/v2/iot/active_air_raid_alerts/31.json";
-  settings.alerts_token = "token";
-  return settings;  // alerts every 20 s, data fresh for 180 s
+  for (size_t i = 0; i < sizeof(settings.key); ++i) {
+    settings.key[i] = static_cast<uint8_t>(i);  // the fixtures' key
+  }
+  return settings;
+}
+
+const char* banner(App& app) {
+  ViewModel view;
+  app.build_view(view);
+  return banner_name(view.banner);
 }
 
 }  // namespace
@@ -63,98 +95,96 @@ Settings alerts_only() {
 void setUp() {}
 void tearDown() {}
 
-// alerts.in.ua blocks tokens that keep calling after a 429. A rate-limited request
-// must not be retried within a minute (the normal failure backoff would be 40 s).
-void test_rate_limited_alerts_wait_a_minute_before_retrying() {
+// The gateway's stale flags cannot help when the gateway itself is gone: a minute
+// without a valid reply must drop the last alert state to "no data", never keep
+// showing it as current.
+void test_a_silent_gateway_turns_the_banner_to_no_data_after_a_minute() {
   FakeTime time;
-  ScriptedServer server({"HTTP/1.0 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n"});
-  App app(alerts_only(), time, server);
+  ScriptedGateway gateway;
+  gateway.snapshots = {ok_reply(fixtures::kSnapshot, sizeof(fixtures::kSnapshot)), ""};
+  gateway.basemaps = {ok_reply(fixtures::kBasemap, sizeof(fixtures::kBasemap))};
+  FixedRandom random;
+  App app(test_settings(), time, gateway, random);
+  TEST_ASSERT_TRUE(app.set_gateway("192.168.1.20"));
 
   app.tick();
-  TEST_ASSERT_EQUAL(1, static_cast<int>(server.requests.size()));
-  time.advance_s(59);
-  app.tick();
-  TEST_ASSERT_EQUAL(1, static_cast<int>(server.requests.size()));
-  time.advance_s(2);
-  app.tick();
-  TEST_ASSERT_EQUAL(2, static_cast<int>(server.requests.size()));
-}
+  TEST_ASSERT_EQUAL_STRING("yellow", banner(app));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        gateway.requests[0].find("GET /v1/snapshot?n=1a2b3c4d HTTP/1.0"));
 
-// alerts.in.ua answers 304 while nothing changes. Those replies confirm the data, so a
-// quiet hour must not turn into "NO ALERT DATA".
-void test_unchanged_replies_keep_the_alert_fresh() {
-  FakeTime time;
-  ScriptedServer server({"HTTP/1.0 200 OK\r\nLast-Modified: Sat, 14 Nov 2026 19:00:00 GMT\r\n\r\n\"N\"",
-                         "HTTP/1.0 304 Not Modified\r\n\r\n"});
-  App app(alerts_only(), time, server);
-
-  for (int i = 0; i < 15; ++i) {  // 300 s of 304 replies, well past the 180 s freshness window
+  gateway.snapshots.clear();  // the gateway goes away
+  for (int i = 0; i < 29; ++i) {
+    time.advance_s(2);
     app.tick();
-    time.advance_s(20);
   }
-  app.tick();
-
-  ViewModel view;
-  app.build_view(view);
-  TEST_ASSERT_EQUAL_STRING("none", banner_name(view.banner));
-  TEST_ASSERT_NOT_EQUAL(std::string::npos, server.requests.back().find("If-Modified-Since: Sat, 14 Nov 2026"));
-}
-
-// Long presses and /debug/refresh ask for an immediate fetch. That must never cut a 429
-// wait short or come within alerts.in.ua's 7.5 s minimum of the previous request.
-void test_refresh_requests_never_break_the_rate_limits() {
-  FakeTime time;
-  ScriptedServer server({"HTTP/1.0 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n",
-                         "HTTP/1.0 200 OK\r\n\r\n\"N\""});
-  App app(alerts_only(), time, server);
-
-  app.tick();  // 429
-  time.advance_s(5);
-  app.refresh_now();
-  app.tick();
-  TEST_ASSERT_EQUAL(1, static_cast<int>(server.requests.size()));
-
-  time.advance_s(56);  // the scheduled retry, 61 s after the 429
-  app.tick();
-  TEST_ASSERT_EQUAL(2, static_cast<int>(server.requests.size()));
+  TEST_ASSERT_EQUAL_STRING("yellow", banner(app));  // 58 s
   time.advance_s(3);
-  app.refresh_now();
   app.tick();
-  TEST_ASSERT_EQUAL(2, static_cast<int>(server.requests.size()));
-  time.advance_s(5);  // now 8 s after the last request
-  app.tick();
-  TEST_ASSERT_EQUAL(3, static_cast<int>(server.requests.size()));
+  TEST_ASSERT_EQUAL_STRING("nodata", banner(app));  // 61 s
 }
 
-// Over plain HTTP (the LAN mock server) the alerts token would travel in clear text.
-void test_the_real_token_only_travels_over_tls() {
-  Settings settings = alerts_only();  // http://mock/...
-  settings.alerts_token = "real-secret-token";
-  {
-    FakeTime time;
-    ScriptedServer server({"HTTP/1.0 200 OK\r\n\r\n\"N\""});
-    App app(settings, time, server);
+// The basemap is downloaded into the buffer it is drawn from. It is fetched once per
+// version, and a download that fails must leave no map rather than a half-overwritten one.
+void test_a_basemap_is_fetched_once_per_version_and_a_failed_download_leaves_no_map() {
+  FakeTime time;
+  ScriptedGateway gateway;
+  gateway.snapshots = {ok_reply(fixtures::kSnapshot, sizeof(fixtures::kSnapshot))};
+  gateway.basemaps = {ok_reply(fixtures::kBasemap, sizeof(fixtures::kBasemap))};
+  FixedRandom random;
+  App app(test_settings(), time, gateway, random);
+  TEST_ASSERT_TRUE(app.set_gateway("192.168.1.20:8080"));
+
+  for (int i = 0; i < 5; ++i) {
     app.tick();
-    TEST_ASSERT_EQUAL(1, static_cast<int>(server.requests.size()));
-    TEST_ASSERT_EQUAL(std::string::npos, server.requests[0].find("real-secret-token"));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, server.requests[0].find("Authorization: Bearer "));
+    time.advance_s(2);
   }
-  settings.alerts_url = "https://api.alerts.in.ua/v2/iot/active_air_raid_alerts/31.json";
-  {
-    FakeTime time;
-    ScriptedServer server({"HTTP/1.0 200 OK\r\n\r\n\"N\""});
-    App app(settings, time, server);
+  TEST_ASSERT_TRUE(app.basemap().valid());
+  TEST_ASSERT_EQUAL_HEX32(fixtures::kBasemapVersion, app.basemap().version());
+  TEST_ASSERT_EQUAL(1, gateway.count("/v1/basemap"));
+
+  const std::string full = ok_reply(fixtures::kBasemap, sizeof(fixtures::kBasemap));
+  gateway.snapshots = {ok_reply(fixtures::kSnapshotNewBasemap, sizeof(fixtures::kSnapshotNewBasemap))};
+  gateway.basemaps = {full.substr(0, full.size() - 100)};  // cut off mid-body
+  app.tick();  // the snapshot announces a new version
+  time.advance_s(2);
+  app.tick();  // the download breaks off
+  TEST_ASSERT_EQUAL(2, gateway.count("/v1/basemap"));
+  TEST_ASSERT_FALSE(app.basemap().valid());
+}
+
+// Each failed poll can block the clock's loop for seconds (connect timeout), so a dead
+// gateway is retried every 10 s rather than every 2 s; a long press still polls at once.
+void test_a_dead_gateway_is_retried_every_ten_seconds_unless_asked() {
+  FakeTime time;
+  ScriptedGateway gateway;  // no scripts: every connection is refused
+  FixedRandom random;
+  App app(test_settings(), time, gateway, random);
+  TEST_ASSERT_TRUE(app.set_gateway("192.168.1.20"));
+  int attempts = 0;
+  auto attempt = [&]() {
     app.tick();
-    TEST_ASSERT_NOT_EQUAL(std::string::npos,
-                          server.requests[0].find("Authorization: Bearer real-secret-token\r\n"));
+    attempts = static_cast<int>(app.status().failures);
+  };
+
+  attempt();
+  for (int i = 0; i < 4; ++i) {  // 8 s
+    time.advance_s(2);
+    attempt();
   }
+  TEST_ASSERT_EQUAL(1, attempts);
+  time.advance_s(2);  // 10 s
+  attempt();
+  TEST_ASSERT_EQUAL(2, attempts);
+  time.advance_s(1);
+  app.press(ButtonEvent::Long);
+  attempt();
+  TEST_ASSERT_EQUAL(3, attempts);
 }
 
 int main() {
   UNITY_BEGIN();
-  RUN_TEST(test_rate_limited_alerts_wait_a_minute_before_retrying);
-  RUN_TEST(test_unchanged_replies_keep_the_alert_fresh);
-  RUN_TEST(test_refresh_requests_never_break_the_rate_limits);
-  RUN_TEST(test_the_real_token_only_travels_over_tls);
+  RUN_TEST(test_a_silent_gateway_turns_the_banner_to_no_data_after_a_minute);
+  RUN_TEST(test_a_basemap_is_fetched_once_per_version_and_a_failed_download_leaves_no_map);
+  RUN_TEST(test_a_dead_gateway_is_retried_every_ten_seconds_unless_asked);
   return UNITY_END();
 }

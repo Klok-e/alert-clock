@@ -9,11 +9,12 @@
 
 // Web service for Wi-Fi setup, firmware updates and hardware-in-the-loop testing.
 // Every route except "/" requires HTTP basic auth as "admin" with the admin password.
-//   GET  /wifi, POST /wifi?ssid=..&password=..  stores Wi-Fi credentials and restarts
-//   GET  /debug/state                  JSON: heap, Wi-Fi, current screen, source health
+//   GET  /wifi, POST /wifi?ssid=..&password=..&gateway=host[:port]
+//                                      stores Wi-Fi credentials and the gateway address; restarts
+//   GET  /debug/state                  JSON: heap, Wi-Fi, current screen, gateway health
 //   POST /debug/press?kind=short|long  simulates the button
-//   POST /debug/refresh                fetches both sources now
-//   POST /debug/sources?threats=URL&alerts=URL   repoints sources until reboot
+//   POST /debug/refresh                polls the gateway now
+//   POST /debug/sources?gateway=host[:port]   points the clock at another gateway until reboot
 //   POST /update                       firmware upload (multipart field "firmware")
 class Service {
  public:

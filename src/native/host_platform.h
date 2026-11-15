@@ -42,5 +42,11 @@ class SocketTransport final : public core::Transport, private core::ByteSource {
   long position_ = 0;
 };
 
-// GET `url` and return the HTTP status, or -1 on transport failure.
-int http_get_status(const std::string& url);
+// Nonces from the operating system's random source.
+class HostRandom final : public core::Random {
+ public:
+  uint32_t next() override;
+};
+
+// GET `url` (plus "?query" when given) and return the HTTP status, or -1 on transport failure.
+int http_get_status(const std::string& url, const char* query = nullptr);
