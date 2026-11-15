@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 
 import mock_server
 from alert_gateway import regions, wire
@@ -35,3 +36,15 @@ def test_the_more_severe_of_the_home_raion_and_oblast_entries_wins():
               "oblasts": [red("київська", "Київська область", "Київська область")]}
 
     assert regions.alert_level(alerts, home) == wire.LEVEL_RED
+
+
+def test_the_alert_counts_from_the_earliest_home_entry_through_an_escalation():
+    # The raion went yellow at 18:00 and the oblast red at 19:00: the alert is two hours old, not one.
+    home = regions.resolve_home(mock_server.OBLASTS, mock_server.RAIONS, *mock_server.HOME_VYSHHOROD)
+    yellow = mock_server.entry("вишгородський", "Вишгородський район", "Київська область", "yellow")
+    yellow["since"] = "2026-11-14T18:00:00.250Z"
+    red_oblast = red("київська", "Київська область", "Київська область")
+    red_oblast["since"] = "2026-11-14T19:00:00Z"
+    alerts = {"raions": [yellow], "oblasts": [red_oblast]}
+
+    assert regions.alert_start(alerts, home) == datetime(2026, 11, 14, 18, 0, 0, 250000, timezone.utc).timestamp()

@@ -107,6 +107,11 @@ int check_expectations(int step, JsonObjectConst expect, const core::ViewModel& 
     failures += check(step, "basemap", expect["basemap"].as<bool>() ? "valid" : "invalid",
                       app.basemap().valid() ? "valid" : "invalid");
   }
+  if (expect["alert_minutes"].is<int>()) {
+    const long minutes = view.alert_duration_s == core::kNever ? -1 : static_cast<long>(view.alert_duration_s / 60);
+    failures += check(step, "alert_minutes", std::to_string(expect["alert_minutes"].as<int>()),
+                      std::to_string(minutes));
+  }
   const int markers = static_cast<int>(app.snapshot().markers.size());
   if (expect["markers_min"].is<int>() && markers < expect["markers_min"].as<int>()) {
     std::printf("FAIL step %d: markers expected >= %d, got %d\n", step, expect["markers_min"].as<int>(), markers);
@@ -129,6 +134,9 @@ void write_state(std::ofstream& out, int step, int64_t at, const std::string& la
   line["panel"] = core::panel_name(view.panel);
   line["banner"] = core::banner_name(view.banner);
   line["alert_level"] = core::alert_level_name(s.alert_level);
+  if (view.alert_duration_s != core::kNever) {
+    line["alert_duration_s"] = view.alert_duration_s;
+  }
   line["markers"] = s.markers.size();
   line["threats_in_watch"] = s.threats_in_watch;
   line["area_only_in_region"] = s.area_only_in_region;

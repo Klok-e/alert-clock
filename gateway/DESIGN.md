@@ -71,6 +71,9 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
     property gives Partial. A Kyiv city home never gets Partial: Kyiv city has no raions, and
     alerts in Київська область do not count;
   - otherwise None. A stale alerts source sends Unknown.
+- **Alert duration.** With a Yellow or Red level, the time since the earliest readable `since`
+  among home's raion and oblast entries, so an escalation from yellow to red keeps counting.
+  None for Partial, None and Unknown, or when no home entry has a readable `since`.
 - **Geometry.** Home is the screen centre (120, 120); `px_per_km` is 120 / map radius. Ring
   radii follow `choose_rings` in `gateway/alert_gateway/geo.py`: the largest step from
   1, 2, 5, 10, 15, 20, 25, 50, 100 km not above a third of the map radius, and up to 3 of its
@@ -108,11 +111,12 @@ pytest fails while that file is out of date with the encoder.
   HMAC-SHA256 over everything before it, which includes the echoed nonce. The clock rejects a
   reply with a bad MAC, a different nonce or an unknown version, and checks the MAC with its
   own SHA-256 in `lib/core/src/sha256.cpp`, which needs no heap.
-- A snapshot carries: the alert level; both stale flags and both sources' ages; the
+- A snapshot carries: the alert level; both stale flags and both sources' ages; the alert
+  duration; the
   basemap version; the map scale (`px_per_km`) and up to 3 ring radii in km; the counts and
   nearest-track fields (distance, kind, heading, advisory, stale); and up to 24 markers, each
   with x, y, heading, kind, flags (approximate, stale, advisory), uncertainty radius in pixels
-  and up to 6 trail points. A whole reply is at most 881 bytes and fits the clock's 1 KB buffer.
+  and up to 6 trail points. A whole reply is at most 885 bytes and fits the clock's 1 KB buffer.
 - `GET /v1/basemap?n=<nonce>` returns the basemap message (header with version and palette, row
   table, rows, MAC), at most 16,384 bytes in all. The basemap version is the CRC-32 of the
   encoded rows and palette, so any content change, including a Pi restart or a late Overpass
@@ -169,7 +173,11 @@ pytest fails while that file is out of date with the encoder.
   `POST /debug/sources?gateway=host[:port]` points the clock at another gateway until reboot.
   `/debug/state` reports heap, the gateway source's last outcome, successes, failures, MAC or
   nonce rejections and seconds since the last valid reply, and the basemap version and
-  validity.
+  validity, and the alert duration shown.
+- **Alert pill.** A Yellow or Red pill adds the alert duration (the gateway's value plus the time
+  since the last valid reply) in its two largest units: "Загроза · 23 хв", "Тривога · 1 год 23 хв",
+  "Тривога · 2 д 3 год", "<1 хв" under a minute; "Повітряна тривога" shortens to "Тривога". Where
+  that does not fit beside the map's time, the pill keeps the duration alone, in its colour.
 - **Screens.** All text is Ukrainian, in Inter converted by `tools/make_fonts.py` (Pillow) to
   GFX fonts in `lib/ui/src/fonts.cpp`, holding ASCII and the Ukrainian Cyrillic letters (А–я,
   Ґґ, Єє, Іі, Її), plus `·` (U+00B7), `©` (U+00A9) and the apostrophe `ʼ` (U+02BC), kept in

@@ -8,7 +8,7 @@
 #include "alerts.h"
 #include "sha256.h"
 
-// The gateway protocol, version 1: gateway/PROTOCOL.md.
+// The gateway protocol, version 2: gateway/PROTOCOL.md.
 namespace core {
 
 enum class ThreatKind : uint8_t { Uav, Recon, Fpv, Missile, Ballistic, Kab, Aircraft, Unknown };
@@ -26,6 +26,7 @@ constexpr size_t kMaxSnapshotBytes = 1024;
 constexpr size_t kMaxBasemapBytes = 16384;
 constexpr int16_t kScreenPx = 240;
 constexpr uint16_t kAgeUnknown = 0xFFFF;
+constexpr uint32_t kDurationUnknown = 0xFFFFFFFF;
 
 struct Marker {
   ScreenPoint point;
@@ -45,6 +46,7 @@ struct Snapshot {
   bool threats_stale = true;
   uint16_t alerts_age_s = kAgeUnknown;
   uint16_t threats_age_s = kAgeUnknown;
+  uint32_t alert_duration_s = kDurationUnknown;  // since home's alert started, at sending
   uint32_t basemap_version = 0;  // 0: the gateway has no basemap
   float px_per_km = 4.0f;
   etl::vector<uint8_t, kMaxRings> ring_km;

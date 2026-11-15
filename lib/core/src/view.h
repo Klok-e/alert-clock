@@ -20,6 +20,7 @@ struct ViewModel {
   bool threats_fresh = false;
   uint32_t threats_age_s = kNever;  // since the gateway's threats source last had good data
   uint32_t alert_age_s = kNever;
+  uint32_t alert_duration_s = kNever;  // shown only with a Yellow or Red banner
   const Snapshot* snapshot = nullptr;  // the last valid snapshot (empty before the first)
   const Basemap* basemap = nullptr;    // drawn only while valid()
 };

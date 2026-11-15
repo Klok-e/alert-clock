@@ -3,11 +3,11 @@
 namespace core {
 namespace {
 
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2;
 constexpr uint8_t kTypeSnapshot = 1;
 constexpr uint8_t kTypeBasemap = 2;
 constexpr size_t kHeaderBytes = 6;
-constexpr size_t kSnapshotFixedBytes = 27;
+constexpr size_t kSnapshotFixedBytes = 31;
 constexpr size_t kMarkerBytes = 10;
 constexpr size_t kTrailPointBytes = 4;
 constexpr size_t kBasemapFixedBytes = 4 + 32 + 2 * kScreenPx + 2;
@@ -196,6 +196,7 @@ WireResult decode_snapshot(const uint8_t* body, size_t length, const GatewayKey&
   s.threats_stale = (flags & 2) != 0;
   s.alerts_age_s = in.u16();
   s.threats_age_s = in.u16();
+  s.alert_duration_s = in.u32();
   s.basemap_version = in.u32();
   s.px_per_km = static_cast<float>(in.u16()) / 100.0f;
   const uint8_t ring_count = in.u8();

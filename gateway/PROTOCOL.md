@@ -1,4 +1,4 @@
-# Clock ↔ gateway protocol, version 1
+# Clock ↔ gateway protocol, version 2
 
 Plain HTTP/1.0 on the gateway's port (default 8080). Every value is little-endian. Every reply
 body ends with a 32-byte HMAC-SHA256 over all bytes before it, keyed with the shared 32-byte
@@ -15,7 +15,7 @@ change to either side, rerun it (a pytest fails until you do).
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| 0 | u8 | version = 1 |
+| 0 | u8 | version = 2 |
 | 1 | u8 | type: 1 snapshot, 2 basemap |
 | 2 | u32 | nonce, echoed from the request's `n` parameter (8 hex digits) |
 
@@ -27,6 +27,7 @@ change to either side, rerun it (a pytest fails until you do).
 | u8 | flags: bit 0 alerts stale, bit 1 threats stale |
 | u16 | alerts age, s: since the alerts source's last good update, saturating at 65,535 |
 | u16 | threats age, s: the same for threats |
+| u32 | alert duration, s: since the start of home's Yellow or Red alert; 0xFFFFFFFF otherwise |
 | u32 | basemap version (CRC-32 of palette and rows); 0 when there is no basemap |
 | u16 | map scale, px per km × 100 |
 | u8 | ring count (0–3), then 3 × u8 ring radii in km (unused ones 0) |
@@ -45,7 +46,7 @@ u8 trail count (0–6), then trail count × (i16 x, i16 y), oldest first.
 Kinds follow `core::ThreatKind`: 0 uav, 1 recon, 2 fpv, 3 missile, 4 ballistic, 5 kab,
 6 aircraft, 7 unknown.
 
-A snapshot with 24 markers of 6 trail points is 881 bytes (6 header + 27 fixed + 24 × 34 + 32 MAC); the clock's buffer is 1,024.
+A snapshot with 24 markers of 6 trail points is 885 bytes (6 header + 31 fixed + 24 × 34 + 32 MAC); the clock's buffer is 1,024.
 
 ## `GET /v1/basemap?n=<nonce>` → type 2
 

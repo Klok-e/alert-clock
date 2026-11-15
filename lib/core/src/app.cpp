@@ -285,6 +285,10 @@ void App::build_view(ViewModel& view) {
     if (snapshot_.alerts_age_s != kAgeUnknown) {
       view.alert_age_s = add_saturating(snapshot_.alerts_age_s, since);
     }
+    if (snapshot_.alert_duration_s != kDurationUnknown &&
+        (view.banner == Banner::Yellow || view.banner == Banner::Red)) {
+      view.alert_duration_s = add_saturating(snapshot_.alert_duration_s, since);
+    }
   }
   if (now > 0) {
     view.time_valid = time_.to_local(now, view.local);

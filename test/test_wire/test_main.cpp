@@ -46,6 +46,7 @@ void test_snapshot_from_the_gateway_decodes_field_for_field() {
   TEST_ASSERT_TRUE(s.threats_stale);
   TEST_ASSERT_EQUAL(12, s.alerts_age_s);
   TEST_ASSERT_EQUAL(190, s.threats_age_s);
+  TEST_ASSERT_EQUAL_UINT32(93784, s.alert_duration_s);
   TEST_ASSERT_EQUAL_HEX32(fixtures::kBasemapVersion, s.basemap_version);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.0f, s.px_per_km);
   TEST_ASSERT_EQUAL(2, static_cast<int>(s.ring_km.size()));
@@ -111,8 +112,8 @@ void test_altered_or_replayed_snapshots_never_change_the_picture() {
 // would drop markers silently.
 void test_signed_snapshot_with_counts_that_disagree_with_its_length_is_malformed() {
   std::vector<uint8_t> message = bytes(fixtures::kSnapshot, sizeof(fixtures::kSnapshot));
-  constexpr size_t kMarkerCount = 6 + 27 - 1;
-  constexpr size_t kFirstTrailCount = 6 + 27 + 9;
+  constexpr size_t kMarkerCount = 6 + 31 - 1;
+  constexpr size_t kFirstTrailCount = 6 + 31 + 9;
   Snapshot s;
   for (const auto& [offset, value] : {std::pair<size_t, uint8_t>{kMarkerCount, 1},
                                       std::pair<size_t, uint8_t>{kMarkerCount, 3},

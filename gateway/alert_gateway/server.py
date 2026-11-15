@@ -94,8 +94,11 @@ class Gateway:
         now = self.clock.now()
         alerts_src, threats_src = self.neptun.sources["alerts"], self.neptun.sources["threats"]
         alerts_stale = alerts_src.stale(now) or self.home is None
+        level = wire.LEVEL_UNKNOWN if alerts_stale else regions.alert_level(self.neptun.alerts, self.home)
+        start = regions.alert_start(self.neptun.alerts, self.home) if level >= wire.LEVEL_YELLOW else None
         s = wire.Snapshot(
-            alert_level=wire.LEVEL_UNKNOWN if alerts_stale else regions.alert_level(self.neptun.alerts, self.home),
+            alert_level=level,
+            alert_duration_s=wire.NO_DURATION if start is None else max(0, int(now - start)),
             alerts_stale=alerts_stale,
             threats_stale=threats_src.stale(now),
             alerts_age_s=min(0xFFFF, int(alerts_src.age(now))) if alerts_src.last_good else 0xFFFF,

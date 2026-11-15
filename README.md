@@ -17,7 +17,7 @@ firmware in the sibling `re-nixie-clock` repository.
 | State | Screen | LED |
 | --- | --- | --- |
 | No alert, nothing nearby | Clock, date and a card with the nearest track | off |
-| Alert at home (red / yellow) or elsewhere in your oblast (partial) | Banner over the clock or map; beeps on change | red / amber / dim red |
+| Alert at home (red / yellow) or elsewhere in your oblast (partial) | Banner over the clock or map with how long the alert has lasted (red / yellow); beeps on change | red / amber / dim red |
 | Tracks within the watch radius | Map: alerted raions and oblasts filled red or yellow, rivers, roads, towns, range rings, your location, tracks with heading arrows, trails of the last 5 min and uncertainty circles | — |
 | Gateway data older than 3 minutes, or no reply from the gateway for 60 s | "Немає даних" banner; never an all-clear | orange |
 

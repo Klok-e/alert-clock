@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import geo
+from .tracks import parse_time
 from .wire import LEVEL_NONE, LEVEL_PARTIAL, LEVEL_RED, LEVEL_YELLOW
 
 
@@ -52,14 +53,26 @@ def entry_level(entry: dict) -> int:
     return LEVEL_YELLOW if entry.get("level") == "yellow" else LEVEL_RED
 
 
+def _home_entries(alerts: dict, home: HomeRegion) -> list[dict]:
+    """The alert entries for home's raion and oblast."""
+    entries = [e for e in alerts.get("raions", []) if home.raion_key and e.get("key") == home.raion_key]
+    return entries + [e for e in alerts.get("oblasts", []) if e.get("key") == home.oblast_key]
+
+
 def alert_level(alerts: dict, home: HomeRegion) -> int:
-    levels = [entry_level(e) for e in alerts.get("raions", []) if home.raion_key and e.get("key") == home.raion_key]
-    levels += [entry_level(e) for e in alerts.get("oblasts", []) if e.get("key") == home.oblast_key]
+    levels = [entry_level(e) for e in _home_entries(alerts, home)]
     if levels:
         return max(levels)
     if home.oblast_key != KYIV_CITY and home.oblast_region and any(e.get("oblast") == home.oblast_region for e in alerts.get("raions", [])):
         return LEVEL_PARTIAL
     return LEVEL_NONE
+
+
+def alert_start(alerts: dict, home: HomeRegion) -> float | None:
+    """Unix time of the earliest `since` among home's entries, so an escalation from yellow to red
+    keeps counting; None with no entry for home (Partial included) or no readable `since`."""
+    starts = [t for t in (parse_time(e.get("since")) for e in _home_entries(alerts, home)) if t is not None]
+    return min(starts) if starts else None
 
 
 def fills(alerts: dict) -> tuple[dict[str, int], dict[str, int]]:

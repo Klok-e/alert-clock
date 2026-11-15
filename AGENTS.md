@@ -23,9 +23,10 @@ After every code or fixture change, run:
    values and the cause.
 
 New screen behaviour gets a scenario in `fixtures/scenarios/` (expectation keys:
-`panel`, `banner`, `sound`, `markers_min`, `markers_max`, `basemap`; a step with
-`"notice": true` draws the start-up notice); its `home` and `start` must fit the constants
-commented at the top of `tools/mock_server.py`. New NEPTUN data shapes get a phase in that file.
+`panel`, `banner`, `sound`, `markers_min`, `markers_max`, `basemap`, `alert_minutes` (−1 for
+none); a step with `"notice": true` draws the start-up notice); its `home` and `start` must fit
+the constants commented at the top of `tools/mock_server.py`. New NEPTUN data shapes get a
+phase in that file.
 
 ## Rules
 

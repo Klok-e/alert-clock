@@ -22,7 +22,7 @@ NONCE = 0x1A2B3C4D
 def snapshot(basemap_version):
     return wire.Snapshot(
         alert_level=wire.LEVEL_YELLOW, alerts_stale=False, threats_stale=True,
-        alerts_age_s=12, threats_age_s=190, basemap_version=basemap_version, px_per_km=4.0,
+        alerts_age_s=12, threats_age_s=190, alert_duration_s=93784, basemap_version=basemap_version, px_per_km=4.0,
         rings_km=[10, 20], threats_in_watch=3, area_only_in_region=1, nearest_km=7.4,
         nearest_kind=wire.KINDS.index("missile"), nearest_heading=225, nearest_advisory=False,
         nearest_stale=True,

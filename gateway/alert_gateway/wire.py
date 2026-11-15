@@ -8,7 +8,7 @@ import struct
 import zlib
 from dataclasses import dataclass, field
 
-VERSION = 1
+VERSION = 2
 TYPE_SNAPSHOT = 1
 TYPE_BASEMAP = 2
 MAC_BYTES = 32
@@ -18,6 +18,7 @@ MAX_RINGS = 3
 MAX_BASEMAP_BYTES = 16384
 SCREEN = 240
 NO_DISTANCE = 0xFFFF
+NO_DURATION = 0xFFFFFFFF
 
 # core::AlertLevel
 LEVEL_UNKNOWN, LEVEL_NONE, LEVEL_PARTIAL, LEVEL_YELLOW, LEVEL_RED = range(5)
@@ -47,6 +48,7 @@ class Snapshot:
     threats_stale: bool = True
     alerts_age_s: int = 0xFFFF
     threats_age_s: int = 0xFFFF
+    alert_duration_s: int = NO_DURATION  # since home's alert started
     basemap_version: int = 0
     px_per_km: float = 4.0
     rings_km: list[int] = field(default_factory=list)
@@ -88,9 +90,10 @@ def encode_snapshot(snapshot: Snapshot, nonce: int, key: bytes) -> bytes:
     rings = list(snapshot.rings_km[:MAX_RINGS])
     nearest = NO_DISTANCE if snapshot.nearest_km is None else _clamp(round(snapshot.nearest_km * 10), 0, 0xFFFE)
     out += struct.pack(
-        "<BBHHIHB3BHHHBhBB",
+        "<BBHHIIHB3BHHHBhBB",
         snapshot.alert_level, flags,
         _clamp(snapshot.alerts_age_s, 0, 0xFFFF), _clamp(snapshot.threats_age_s, 0, 0xFFFF),
+        _clamp(snapshot.alert_duration_s, 0, NO_DURATION),
         snapshot.basemap_version & 0xFFFFFFFF,
         _clamp(round(snapshot.px_per_km * 100), 0, 0xFFFF),
         len(rings), *(rings + [0] * (MAX_RINGS - len(rings))),
@@ -168,14 +171,14 @@ def decode_snapshot(message: bytes, key: bytes, nonce: int) -> Snapshot:
     version, kind, echoed = struct.unpack_from("<BBI", body, 0)
     if version != VERSION or kind != TYPE_SNAPSHOT or echoed != nonce:
         raise ValueError("wrong version, type or nonce")
-    fields = struct.unpack_from("<BBHHIHB3BHHHBhBB", body, 6)
-    (level, flags, alerts_age, threats_age, version_map, scale, ring_count, r0, r1, r2,
+    fields = struct.unpack_from("<BBHHIIHB3BHHHBhBB", body, 6)
+    (level, flags, alerts_age, threats_age, duration, version_map, scale, ring_count, r0, r1, r2,
      in_watch, area_only, nearest, nearest_kind, nearest_heading, nearest_flags, count) = fields
-    s = Snapshot(level, bool(flags & 1), bool(flags & 2), alerts_age, threats_age, version_map,
+    s = Snapshot(level, bool(flags & 1), bool(flags & 2), alerts_age, threats_age, duration, version_map,
                  scale / 100, [r0, r1, r2][:ring_count], in_watch, area_only,
                  None if nearest == NO_DISTANCE else nearest / 10, nearest_kind, nearest_heading,
                  bool(nearest_flags & 1), bool(nearest_flags & 2))
-    position = 6 + struct.calcsize("<BBHHIHB3BHHHBhBB")
+    position = 6 + struct.calcsize("<BBHHIIHB3BHHHBhBB")
     for _ in range(count):
         x, y, heading, k, f, unc, trail_count = struct.unpack_from("<hhhBBBB", body, position)
         position += 10

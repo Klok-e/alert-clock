@@ -79,6 +79,12 @@ const char kAgeSeconds[] PROGMEM = "%u с";
 const char kAgeMinutes[] PROGMEM = "%u хв";
 const char kAgeHours[] PROGMEM = "%u год";
 
+const char kDurationUnderMinute[] PROGMEM = "<1 хв";
+const char kDurationMinutes[] PROGMEM = "%u хв";
+const char kDurationHours[] PROGMEM = "%u год %u хв";
+const char kDurationDays[] PROGMEM = "%u д %u год";
+const char kPillWithDuration[] PROGMEM = "%s · %s";
+
 const char kCardStaleTitle[] PROGMEM = "Дані: %s тому";
 const char kCardStaleDetail[] PROGMEM = "цілі могли зміститися";
 const char kCardRegionTitle[] PROGMEM = "%u у вашій області";
@@ -175,6 +181,20 @@ void format_age(char* out, size_t size, uint32_t seconds) {
   }
 }
 
+// The two largest units: "<1 хв", "23 хв", "1 год 23 хв", "2 д 3 год".
+void format_duration(char* out, size_t size, uint32_t seconds) {
+  const unsigned minutes = static_cast<unsigned>(seconds / 60);
+  if (minutes == 0) {
+    flash_copy(out, size, kDurationUnderMinute);
+  } else if (minutes < 60) {
+    flash_format(out, size, kDurationMinutes, minutes);
+  } else if (minutes < 24 * 60) {
+    flash_format(out, size, kDurationHours, minutes / 60, minutes % 60);
+  } else {
+    flash_format(out, size, kDurationDays, minutes / (24 * 60), minutes / 60 % 24);
+  }
+}
+
 // Drawing context for one strip: translates scene coordinates and skips shapes
 // that cannot touch the strip.
 struct Canvas {
@@ -199,16 +219,38 @@ struct Canvas {
   }
 };
 
+constexpr int32_t kPillPadding = 10 + 6 + 7 + 12;  // left edge, dot, gap, right edge
+
+// The banner label; with a duration (not kNever), the short label and the duration, as
+// "Тривога · 1 год 23 хв", or the duration alone, in the pill's colour, if that is wider than
+// `max_width`.
+void pill_label(Canvas& c, char* out, size_t size, Banner banner, bool short_label, uint32_t duration_s,
+                int32_t max_width) {
+  const size_t index = static_cast<size_t>(banner) % 5;
+  if (duration_s == core::kNever) {
+    flash_copy(out, size, short_label ? kBannerShort[index] : kBannerLong[index]);
+    return;
+  }
+  char label[kLabelBytes];
+  char duration[24];
+  flash_copy(label, sizeof(label), kBannerShort[index]);
+  format_duration(duration, sizeof(duration), duration_s);
+  flash_format(out, size, kPillWithDuration, label, duration);
+  c.g.setFont(&kInterTitle);
+  if (c.g.textWidth(out) + kPillPadding > max_width) {
+    std::snprintf(out, size, "%s", duration);
+  }
+}
+
 // A rounded pill with a dot and a label; returns its width. `x` is the left edge, or the
 // centre when `centered`.
-int16_t draw_pill(Canvas& c, int32_t x, int32_t top, Banner banner, bool short_label, bool centered) {
+int16_t draw_pill(Canvas& c, int32_t x, int32_t top, Banner banner, bool short_label, bool centered,
+                  uint32_t duration_s, int32_t max_width) {
   const BannerStyle style = banner_style(banner);
-  char label[kLabelBytes];
-  const size_t index = static_cast<size_t>(banner) % 5;
-  flash_copy(label, sizeof(label), short_label ? kBannerShort[index] : kBannerLong[index]);
+  char label[kLabelBytes + 24];
+  pill_label(c, label, sizeof(label), banner, short_label, duration_s, max_width);
   c.g.setFont(&kInterTitle);
-  const int32_t text_width = c.g.textWidth(label);
-  const int32_t width = 10 + 6 + 7 + text_width + 12;
+  const int32_t width = c.g.textWidth(label) + kPillPadding;
   const int32_t left = centered ? x - width / 2 : x;
   if (c.touches(top, kPillHeight)) {
     c.g.fillRoundRect(left, c.y(top), width, kPillHeight, kPillHeight / 2, to565(style.background));
@@ -343,7 +385,7 @@ int32_t unofficial_width(Canvas& c) {
 
 void draw_clock_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   c.g.fillScreen(kBackground);
-  draw_pill(c, kCenter, 12, view.banner, false, true);
+  draw_pill(c, kCenter, 12, view.banner, false, true, view.alert_duration_s, kSize - 12);
 
   const int32_t time_baseline = 110;
   if (c.touches(time_baseline - 56, 60)) {
@@ -471,9 +513,6 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
 
   // Top: the banner pill, the time pill and north.
   const int32_t pill_top = 6;
-  if (view.banner != Banner::None) {
-    draw_pill(c, 6, pill_top, view.banner, true, false);
-  }
   if (c.touches(pill_top, kPillHeight)) {
     char text[8];
     if (view.time_valid) {
@@ -483,6 +522,9 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
     }
     c.g.setFont(&kInterTitle);
     const int32_t width = c.g.textWidth(text) + 16;
+    if (view.banner != Banner::None) {
+      draw_pill(c, 6, pill_top, view.banner, true, false, view.alert_duration_s, kSize - 6 - width - 6 - 4);
+    }
     c.g.fillRoundRect(kSize - 6 - width, c.y(pill_top), width, kPillHeight, kPillHeight / 2, kBackground);
     c.ram_text(text, kSize - 6 - width / 2, pill_top + kPillHeight / 2, &kInterTitle, kWhite,
                lgfx::textdatum_t::middle_center);

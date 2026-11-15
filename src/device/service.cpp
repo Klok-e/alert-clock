@@ -19,7 +19,7 @@ const char kStateFormat[] PROGMEM =
     "\"heap\":{\"free\":%lu,\"max_block\":%lu,\"fragmentation\":%u},"
     "\"wifi\":{\"connected\":%s,\"rssi\":%d},"
     "\"view\":{\"panel\":\"%s\",\"banner\":\"%s\",\"time_valid\":%s,\"markers\":%u,"
-    "\"threats_in_watch\":%u,\"alert_level\":\"%s\"},"
+    "\"threats_in_watch\":%u,\"alert_level\":\"%s\",\"alert_duration_s\":%ld},"
     "\"gateway\":{\"configured\":%s,\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
     "\"successes\":%lu,\"failures\":%lu,\"rejections\":%lu,\"since_valid_s\":%ld,"
     "\"alerts_stale\":%s,\"threats_stale\":%s},"
@@ -140,6 +140,7 @@ void Service::send_state() {
       static_cast<int>(WiFi.RSSI()), core::panel_name(view_.panel), core::banner_name(view_.banner),
       json_bool(view_.time_valid), static_cast<unsigned>(snapshot.markers.size()),
       static_cast<unsigned>(snapshot.threats_in_watch), core::alert_level_name(snapshot.alert_level),
+      view_.alert_duration_s == core::kNever ? -1L : static_cast<long>(view_.alert_duration_s),
       json_bool(app_.gateway_configured()), core::fetch_outcome_name(gateway.last_outcome),
       gateway.last_http_status, core::wire_result_name(gateway.last_rejection),
       static_cast<unsigned long>(gateway.successes), static_cast<unsigned long>(gateway.failures),
