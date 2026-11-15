@@ -18,7 +18,7 @@ After every code or fixture change, run:
    naming the frames directory). Frames show the layout as the clock composes it;
    orientation, colour order and offset on the real panel need a photo of the clock
    from the user, since the screen cannot be read back.
-4. `pio run -e clock` passes on SUCCESS with the `RAM:` line at or below 57,000 bytes.
+4. `pio run -e clock` passes on SUCCESS with the `RAM:` line at or below 60,000 bytes.
    Note the value before you change code; when your change raises it, report both
    values and the cause.
 

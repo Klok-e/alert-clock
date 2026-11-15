@@ -118,7 +118,7 @@ pytest fails while that file is out of date with the encoder.
   with x, y, heading, kind, flags (approximate, stale, advisory), uncertainty radius in pixels
   and up to 6 trail points. A whole reply is at most 885 bytes and fits the clock's 1 KB buffer.
 - `GET /v1/basemap?n=<nonce>` returns the basemap message (header with version and palette, row
-  table, rows, MAC), at most 16,384 bytes in all. The basemap version is the CRC-32 of the
+  table, rows, MAC), at most 20,480 bytes in all. The basemap version is the CRC-32 of the
   encoded rows and palette, so any content change, including a Pi restart or a late Overpass
   layer, changes it. The clock fetches it at start-up and whenever a snapshot's version differs
   from the one it holds. It downloads straight into its one basemap buffer and marks the map
@@ -145,12 +145,20 @@ pytest fails while that file is out of date with the encoder.
   version changes).
 - **Encoding.** Each row is a run count followed by (length, colour) byte pairs; a table of 240
   16-bit row offsets lets the clock decode one 4-row strip at a time. The whole basemap message
-  fits in 16,384 bytes.
+  fits in 20,480 bytes.
+- **Water.** Water areas (`natural=water` ways, and relations whose member ways join into closed
+  outer rings, with their inner rings as holes) are filled; areas under 20 screen pixels are left
+  out as speckle. Named `waterway=river` ways are 1-pixel lines; unnamed ones are left out. Water
+  paints only bare ground, so an alerted area keeps its fill over a reservoir, and its colour stays
+  close to the ground so fills and tracks stand out.
 - **Fitting, one pass, no retries.** Layers go in this order: fills and borders, home label,
-  water, roads, place labels. The Pi encodes each layer onto the result so far and keeps it only
-  if the total still fits; a layer that does not fit is skipped and the next one is tried. Fills,
-  borders and the home label are required: if they alone do not fit, the configuration (map
-  radius too large for the area's borders) is an error, and the service logs it and exits.
+  water, roads, then place labels one at a time: cities, then by population, then nearest home,
+  skipping a label that would overlap one already placed. The Pi encodes each layer or label onto
+  the result so far and keeps it only if the total still fits; one that does not fit is skipped
+  and the next one is tried. Fills, borders and the home label are required: if they alone do not
+  fit, the configuration (map radius too large for the area's borders) is an error, and the
+  service logs it and exits. `gateway/tests/test_basemap.py` checks a real Overpass response
+  around Kyiv (`fixtures/osm`) keeps roads and labels within the budget.
 - **Text.** The Pi renders labels with Pillow in Inter (SIL Open Font Licence,
   https://github.com/rsms/inter), in Ukrainian.
 
@@ -159,7 +167,7 @@ pytest fails while that file is out of date with the encoder.
 - **Removed:** TLS and the root certificates, the NEPTUN and alerts.in.ua parsers, `geo`,
   ArduinoJson and its parse arena, the alerts token, the compile-time home and radius settings.
   Their logic and tests move to Python.
-- **Added, as static buffers:** a 1,024-byte reply buffer and a 16,384-byte basemap buffer that
+- **Added, as static buffers:** a 1,024-byte reply buffer and a 20,480-byte basemap buffer that
   holds the whole basemap message; plus the gateway source (HTTP every 2 s, nonce, MAC check) and a
   per-strip RLE decoder.
 - **Freshness.** With no valid reply for 60 s, the clock treats both sources as stale: NoData
@@ -188,8 +196,9 @@ pytest fails while that file is out of date with the encoder.
   (state that it is unofficial and refer users to official signals) require these.
 - **RAM.** The last build with HTTPS used 42,092 bytes of static RAM. Removing HTTPS-era state
   saves about 4 KB of static RAM and the about 25 KB HTTPS fetch peak; the new static buffers
-  add about 18 KB. Static RAM comes to about 56 KB, leaving about 26 KB of heap at start-up and
-  about 14 KB free at the worst moment once Wi-Fi and the web server take their share.
+  add about 18 KB. Static RAM came to about 55 KB, and the clock showed about 21 KB of free heap
+  while serving `/debug/state` on Wi-Fi. The basemap buffer then grew from 16 KB to 20 KB, leaving
+  about 17 KB of that heap, above the 12,000 bytes Wi-Fi and the web server need.
 
 ## Gateway on the Pi
 

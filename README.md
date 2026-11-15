@@ -78,8 +78,8 @@ python3 tools/make_wire_fixtures.py           # regenerate the C++ protocol fixt
 | `src/native` | The PC scenario program. |
 | `fixtures/scenarios`, `tools/` | Scripted NEPTUN data, the mock server and the scenario runner. |
 
-Memory is the main constraint. Static data takes about 55 KB of the ESP8266's 80 KB of RAM,
-16 KB of it the basemap, which the clock keeps run-length encoded and decodes one 4-row strip
+Memory is the main constraint. Static data takes about 59 KB of the ESP8266's 80 KB of RAM,
+20 KB of it the basemap, which the clock keeps run-length encoded and decodes one 4-row strip
 at a time; Wi-Fi and the web server share the rest. Plain HTTP to the Pi removes the 16.7 KB
 TLS buffer the clock once needed. `/debug/state` reports free heap and the largest free block.
 

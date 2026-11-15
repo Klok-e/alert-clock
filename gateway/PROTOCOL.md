@@ -59,7 +59,7 @@ A snapshot with 24 markers of 6 trail points is 885 bytes (6 header + 31 fixed +
 | bytes | rows area |
 
 Each row: u8 run count, then run count × (u8 length 1–255, u8 palette index 0–15); a row's
-lengths sum to 240. The whole body, MAC included, is at most 16,384 bytes. When the gateway has
+lengths sum to 240. The whole body, MAC included, is at most 20,480 bytes. When the gateway has
 no basemap it answers 404.
 
 ## Test endpoint (`--test` only)
