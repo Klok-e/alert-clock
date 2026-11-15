@@ -197,7 +197,10 @@ pytest fails while that file is out of date with the encoder.
 - **Threat symbols.** The map and nearest-track card distinguish UAVs (delta wing), FPV
   drones (four rotors), reconnaissance (eye), missiles (rocket), ballistic threats (bolt),
   guided bombs (bomb), aircraft (plane), and unknown types (question mark). The glyph stays
-  upright; a separate outer pointer shows bearing and is omitted when heading is unknown.
+  upright; a larger outer pointer with light and dark outlines shows bearing and is omitted
+  when heading is unknown. Four contrasting corner brackets frame the nearest track whose
+  centre lies inside the map viewport; the brackets follow the distance ordering supplied
+  by the gateway and remain distinct from uncertainty circles.
   Advisories remain hollow grey and stale symbols fade. Generic card states use a dot.
 - **Paths.** Reported history is a bright two-pixel solid line with a dark outline, fading
   by point order toward its oldest end. The estimated segment from reported position to

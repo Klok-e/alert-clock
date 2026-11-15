@@ -333,7 +333,7 @@ void draw_kind_glyph(Canvas& c, int32_t x, int32_t y, ThreatKind kind, uint16_t 
 
 void draw_threat_badge(Canvas& c, int32_t x, int32_t y, ThreatKind kind,
                        int16_t heading_deg, Rgb fill, bool hollow, bool stale, uint16_t ground) {
-  constexpr int32_t kExtent = 11;
+  constexpr int32_t kExtent = 20;
   if (!c.touches(y - kExtent, 2 * kExtent + 1)) {
     return;
   }
@@ -345,14 +345,20 @@ void draw_threat_badge(Canvas& c, int32_t x, int32_t y, ThreatKind kind,
   const float heading = static_cast<float>(heading_deg) * 3.14159265f / 180.0f;
   const float dx = std::sin(heading);
   const float dy = -std::cos(heading);
-  const int32_t tip_x = x + static_cast<int32_t>(std::lround(11.0f * dx));
-  const int32_t tip_y = y + static_cast<int32_t>(std::lround(11.0f * dy));
-  const int32_t base_x = x + static_cast<int32_t>(std::lround(9.0f * dx));
-  const int32_t base_y = y + static_cast<int32_t>(std::lround(9.0f * dy));
-  const int32_t side_x = static_cast<int32_t>(std::lround(2.0f * dy));
-  const int32_t side_y = static_cast<int32_t>(std::lround(-2.0f * dx));
-  c.g.fillTriangle(tip_x, c.y(tip_y), base_x + side_x, c.y(base_y + side_y),
-                   base_x - side_x, c.y(base_y - side_y), to565(fill));
+  const auto triangle = [&](float tip, float base, float half_width, uint16_t color) {
+    const int32_t tip_x = x + static_cast<int32_t>(std::lround(tip * dx));
+    const int32_t tip_y = y + static_cast<int32_t>(std::lround(tip * dy));
+    const int32_t base_x = x + static_cast<int32_t>(std::lround(base * dx));
+    const int32_t base_y = y + static_cast<int32_t>(std::lround(base * dy));
+    const int32_t side_x = static_cast<int32_t>(std::lround(half_width * dy));
+    const int32_t side_y = static_cast<int32_t>(std::lround(-half_width * dx));
+    c.g.fillTriangle(tip_x, c.y(tip_y), base_x + side_x, c.y(base_y + side_y),
+                     base_x - side_x, c.y(base_y - side_y), color);
+  };
+  const uint16_t outline = stale ? to565(mix(kWhiteRgb, kNavy, 50)) : kWhite;
+  triangle(20.0f, 7.0f, 5.5f, ground);
+  triangle(19.0f, 8.0f, 4.5f, outline);
+  triangle(18.0f, 9.0f, 3.5f, to565(fill));
 }
 
 void draw_time(Canvas& c, const ViewModel& view, int32_t baseline) {
@@ -428,8 +434,8 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
   } else {
     draw_status_badge(c, kLeft + 22, top + kHeight / 2, badge, kCard);
   }
-  c.ram_text(title, kLeft + 40, top + 22, &kInterTitle, title_color, lgfx::textdatum_t::baseline_left);
-  c.ram_text(detail, kLeft + 40, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);
+  c.ram_text(title, kLeft + 46, top + 22, &kInterTitle, title_color, lgfx::textdatum_t::baseline_left);
+  c.ram_text(detail, kLeft + 46, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);
 }
 
 void draw_credit(Canvas& c, int32_t baseline) {
@@ -600,6 +606,29 @@ void draw_trail(Canvas& c, const Marker& marker, Rgb color) {
   draw_prediction(c, marker, color);
 }
 
+void draw_nearest_focus(Canvas& c, const Marker& marker) {
+  constexpr int32_t kRadius = 12;
+  constexpr int32_t kArm = 4;
+  const int32_t x = marker.point.x;
+  const int32_t y = marker.point.y;
+  if (!c.touches(y - kRadius - 1, 2 * kRadius + 3)) {
+    return;
+  }
+  const uint16_t ink = marker.stale ? to565(mix(kWhiteRgb, kNavy, 50)) : kWhite;
+  for (int32_t sx = -1; sx <= 1; sx += 2) {
+    for (int32_t sy = -1; sy <= 1; sy += 2) {
+      const int32_t cx = x + sx * kRadius;
+      const int32_t cy = y + sy * kRadius;
+      const int32_t left = sx < 0 ? cx : cx - kArm;
+      const int32_t top = sy < 0 ? cy : cy - kArm;
+      c.g.fillRect(left - 1, c.y(cy - 1), kArm + 3, 3, kBackground);
+      c.g.fillRect(cx - 1, c.y(top - 1), 3, kArm + 3, kBackground);
+      c.g.drawFastHLine(left, c.y(cy), kArm + 1, ink);
+      c.g.drawFastVLine(cx, c.y(top), kArm + 1, ink);
+    }
+  }
+}
+
 void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   if (!draw_basemap(c, view.basemap)) {
     c.g.fillScreen(kBackground);
@@ -637,6 +666,15 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
     draw_threat_badge(c, marker.point.x, marker.point.y, marker.kind, marker.heading_deg,
                       marker_rgb(marker.kind, marker.advisory, marker.stale, ground_rgb),
                       marker.advisory, marker.stale, kBackground);
+  }
+
+  // Gateway markers are nearest first; focus the first centre inside the map viewport.
+  for (const Marker& marker : s.markers) {
+    if (marker.point.x >= 0 && marker.point.x < kSize && marker.point.y >= 0 &&
+        marker.point.y < kSize - kFooterHeight) {
+      draw_nearest_focus(c, marker);
+      break;
+    }
   }
 
   // Top: the banner pill, the time pill and north.

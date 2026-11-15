@@ -1,0 +1,78 @@
+{
+  "description": "Corner brackets follow the nearest visible track, survive unknown heading, and disappear on an empty map.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [
+    50.4501,
+    30.5234
+  ],
+  "map_radius_km": 30,
+  "watch_radius_km": 45,
+  "steps": [
+    {
+      "at": 0,
+      "phase": "focus_north",
+      "label": "north-is-nearest",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "basemap": true,
+        "markers_min": 2,
+        "markers_max": 2
+      }
+    },
+    {
+      "at": 10,
+      "phase": "focus_east",
+      "label": "east-is-nearest",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "basemap": true,
+        "markers_min": 2,
+        "markers_max": 2
+      }
+    },
+    {
+      "at": 20,
+      "phase": "focus_no_heading",
+      "label": "unknown-heading",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "basemap": true,
+        "markers_min": 2,
+        "markers_max": 2
+      }
+    },
+    {
+      "at": 30,
+      "phase": "quiet",
+      "label": "empty-map",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "basemap": true,
+        "markers_min": 0,
+        "markers_max": 0
+      },
+      "press": "short"
+    },
+    {
+      "at": 40,
+      "phase": "focus_offscreen",
+      "label": "nearest-visible",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "basemap": true,
+        "markers_min": 2,
+        "markers_max": 2
+      }
+    }
+  ]
+}

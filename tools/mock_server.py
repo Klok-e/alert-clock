@@ -135,7 +135,17 @@ def icon_grid(advisory=False, stale=False, edges=False):
     return result
 
 
+def focus_tracks(north_km, other_km, other_bearing=90, unknown_heading=False):
+    return [track("focus_north", "missile", 0, north_km, heading=90, speed=0),
+            track("focus_other", "uav", other_bearing, other_km,
+                  heading=None if unknown_heading else 270, speed=0)]
+
+
 PHASES = {
+    "focus_north": {"threats": focus_tracks(12, 18), "alerts": QUIET_ALERTS},
+    "focus_east": {"threats": focus_tracks(20, 8), "alerts": QUIET_ALERTS},
+    "focus_no_heading": {"threats": focus_tracks(20, 8, unknown_heading=True), "alerts": QUIET_ALERTS},
+    "focus_offscreen": {"threats": focus_tracks(31, 32, other_bearing=45), "alerts": QUIET_ALERTS},
     "icons_grid": {"threats": icon_grid(), "alerts": QUIET_ALERTS},
     "icons_advisory": {"threats": icon_grid(advisory=True), "alerts": QUIET_ALERTS},
     "icons_stale": {"threats": icon_grid(stale=True), "alerts": QUIET_ALERTS},
