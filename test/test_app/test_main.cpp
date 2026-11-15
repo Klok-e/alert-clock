@@ -43,8 +43,15 @@ class ScriptedGateway final : public Transport {
   std::deque<std::string> snapshots;
   std::deque<std::string> basemaps;
   std::vector<std::string> requests;
+  FakeTime* time = nullptr;
+  uint32_t request_ms = 0;
+  ReadEnd end_reason = ReadEnd::Closed;
 
   bool connect(const Url& url) override {
+    source_.reset("", 0, end_reason);
+    if (time != nullptr) {
+      time->now_ms += request_ms;
+    }
     std::deque<std::string>& script = url.path == "/v1/basemap" ? basemaps : snapshots;
     if (script.empty()) {
       return false;
@@ -53,7 +60,7 @@ class ScriptedGateway final : public Transport {
     if (script.size() > 1) {
       script.pop_front();
     }
-    source_ = MemorySource(current_.data(), current_.size());
+    source_.reset(current_.data(), current_.size(), end_reason);
     return true;
   }
   bool write(const char* data, size_t length) override {
@@ -62,6 +69,7 @@ class ScriptedGateway final : public Transport {
   }
   ByteSource& input() override { return source_; }
   void close() override {}
+  ReadEnd read_end() const override { return source_.ended; }
 
   int count(const char* path) const {
     int n = 0;
@@ -73,7 +81,28 @@ class ScriptedGateway final : public Transport {
 
  private:
   std::string current_;
-  MemorySource source_{"", 0};
+  class ScriptedSource final : public ByteSource {
+   public:
+    ReadEnd ended = ReadEnd::None;
+
+    void reset(const char* data, size_t length, ReadEnd reason) {
+      memory_ = MemorySource(data, length);
+      reason_ = reason;
+      ended = ReadEnd::None;
+    }
+
+    int read() override {
+      const int byte = memory_.read();
+      if (byte < 0) {
+        ended = reason_;
+      }
+      return byte;
+    }
+
+   private:
+    MemorySource memory_{"", 0};
+    ReadEnd reason_ = ReadEnd::Closed;
+  } source_;
 };
 
 Settings test_settings() {
@@ -144,12 +173,46 @@ void test_a_basemap_is_fetched_once_per_version_and_a_failed_download_leaves_no_
 
   const std::string full = ok_reply(fixtures::kBasemap, sizeof(fixtures::kBasemap));
   gateway.snapshots = {ok_reply(fixtures::kSnapshotNewBasemap, sizeof(fixtures::kSnapshotNewBasemap))};
+  gateway.time = &time;
+  gateway.request_ms = 37;
   gateway.basemaps = {full.substr(0, full.size() - 100)};  // cut off mid-body
   app.tick();  // the snapshot announces a new version
   time.advance_s(2);
   app.tick();  // the download breaks off
   TEST_ASSERT_EQUAL(2, gateway.count("/v1/basemap"));
   TEST_ASSERT_FALSE(app.basemap().valid());
+  const TransferStatus failed = app.basemap_status().last_failure;
+  TEST_ASSERT_EQUAL(static_cast<int>(FetchOutcome::Truncated), static_cast<int>(failed.outcome));
+  TEST_ASSERT_EQUAL(200, failed.http_status);
+  TEST_ASSERT_EQUAL(sizeof(fixtures::kBasemap), failed.expected_bytes);
+  TEST_ASSERT_EQUAL(sizeof(fixtures::kBasemap) - 100, failed.received_bytes);
+  TEST_ASSERT_EQUAL(static_cast<int>(ReadEnd::Closed), static_cast<int>(failed.read_end));
+  TEST_ASSERT_EQUAL(37, failed.duration_ms);
+  TEST_ASSERT_EQUAL(1, app.basemap_status().successes);
+  TEST_ASSERT_EQUAL(1, app.basemap_status().failures);
+  TEST_ASSERT_EQUAL(static_cast<int>(FetchOutcome::Ok), static_cast<int>(app.status().last_outcome));
+  TEST_ASSERT_EQUAL(0, app.status().failures);
+
+  gateway.basemaps = {full};
+  time.advance_s(31);
+  app.tick();  // a later snapshot schedules the basemap retry
+  TEST_ASSERT_EQUAL(static_cast<int>(FetchOutcome::Truncated),
+                    static_cast<int>(app.basemap_status().last.outcome));
+  app.tick();
+  TEST_ASSERT_TRUE(app.basemap().valid());
+  TEST_ASSERT_EQUAL(3, gateway.count("/v1/basemap"));
+  const BasemapStatus& recovered = app.basemap_status();
+  TEST_ASSERT_EQUAL(static_cast<int>(FetchOutcome::Ok), static_cast<int>(recovered.last.outcome));
+  TEST_ASSERT_EQUAL(sizeof(fixtures::kBasemap), recovered.last.received_bytes);
+  TEST_ASSERT_EQUAL(static_cast<int>(ReadEnd::None), static_cast<int>(recovered.last.read_end));
+  TEST_ASSERT_EQUAL(2, recovered.successes);
+  TEST_ASSERT_EQUAL(1, recovered.failures);
+  TEST_ASSERT_EQUAL(static_cast<int>(failed.outcome), static_cast<int>(recovered.last_failure.outcome));
+  TEST_ASSERT_EQUAL(failed.http_status, recovered.last_failure.http_status);
+  TEST_ASSERT_EQUAL(failed.expected_bytes, recovered.last_failure.expected_bytes);
+  TEST_ASSERT_EQUAL(failed.received_bytes, recovered.last_failure.received_bytes);
+  TEST_ASSERT_EQUAL(static_cast<int>(failed.read_end), static_cast<int>(recovered.last_failure.read_end));
+  TEST_ASSERT_EQUAL(failed.duration_ms, recovered.last_failure.duration_ms);
 }
 
 // Each failed poll can block the clock's loop for seconds (connect timeout), so a dead

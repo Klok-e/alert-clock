@@ -8,9 +8,8 @@ namespace {
 
 constexpr const char* kUser = "admin";
 constexpr uint32_t kRestartDelayMs = 1500;
-// The state document is about 600 bytes; it is formatted on the stack, from a format
-// string kept in flash, so it costs no static RAM.
-constexpr size_t kStateBytes = 896;
+// Worst-case state JSON is under 1,200 bytes; format storage remains on the stack.
+constexpr size_t kStateBytes = 1280;
 
 // Every value below is a number, a boolean or one of the fixed enum names, so no
 // JSON escaping is needed.
@@ -23,7 +22,13 @@ const char kStateFormat[] PROGMEM =
     "\"gateway\":{\"configured\":%s,\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
     "\"successes\":%lu,\"failures\":%lu,\"rejections\":%lu,\"since_valid_s\":%ld,"
     "\"alerts_stale\":%s,\"threats_stale\":%s},"
-    "\"basemap\":{\"valid\":%s,\"version\":%lu,\"wanted\":%lu}}\n";
+    "\"basemap\":{\"valid\":%s,\"version\":%lu,\"wanted\":%lu,"
+    "\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
+    "\"read_end\":\"%s\",\"expected_bytes\":%ld,\"received_bytes\":%lu,"
+    "\"duration_ms\":%lu,\"successes\":%lu,\"failures\":%lu,"
+    "\"last_failure\":{\"outcome\":\"%s\",\"http\":%d,"
+    "\"rejection\":\"%s\",\"read_end\":\"%s\",\"expected_bytes\":%ld,"
+    "\"received_bytes\":%lu,\"duration_ms\":%lu}}}\n";
 
 const char* json_bool(bool value) { return value ? "true" : "false"; }
 
@@ -128,6 +133,9 @@ bool Service::authorized() {
 void Service::send_state() {
   const rst_info* reset = ESP.getResetInfoPtr();
   const core::GatewayStatus& gateway = app_.status();
+  const core::BasemapStatus& basemap_status = app_.basemap_status();
+  const core::TransferStatus& basemap_last = basemap_status.last;
+  const core::TransferStatus& basemap_failure = basemap_status.last_failure;
   const core::Snapshot& snapshot = app_.snapshot();
   const uint32_t since = app_.since_valid_s();
   char text[kStateBytes];
@@ -146,7 +154,16 @@ void Service::send_state() {
       static_cast<unsigned long>(gateway.successes), static_cast<unsigned long>(gateway.failures),
       static_cast<unsigned long>(gateway.rejections), since == core::kNever ? -1L : static_cast<long>(since),
       json_bool(snapshot.alerts_stale), json_bool(snapshot.threats_stale), json_bool(app_.basemap().valid()),
-      static_cast<unsigned long>(app_.basemap().version()), static_cast<unsigned long>(snapshot.basemap_version));
+      static_cast<unsigned long>(app_.basemap().version()), static_cast<unsigned long>(snapshot.basemap_version),
+      core::fetch_outcome_name(basemap_last.outcome), basemap_last.http_status,
+      core::wire_result_name(basemap_last.rejection), core::read_end_name(basemap_last.read_end),
+      static_cast<long>(basemap_last.expected_bytes), static_cast<unsigned long>(basemap_last.received_bytes),
+      static_cast<unsigned long>(basemap_last.duration_ms),
+      static_cast<unsigned long>(basemap_status.successes), static_cast<unsigned long>(basemap_status.failures),
+      core::fetch_outcome_name(basemap_failure.outcome), basemap_failure.http_status,
+      core::wire_result_name(basemap_failure.rejection), core::read_end_name(basemap_failure.read_end),
+      static_cast<long>(basemap_failure.expected_bytes), static_cast<unsigned long>(basemap_failure.received_bytes),
+      static_cast<unsigned long>(basemap_failure.duration_ms));
   if (length <= 0 || static_cast<size_t>(length) >= sizeof(text)) {
     server_.send(500, "text/plain", "state too large\n");
     return;

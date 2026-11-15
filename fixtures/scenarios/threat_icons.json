@@ -1,0 +1,65 @@
+{
+  "description": "Distinct threat glyphs, independent bearings, grey advisories, faded stale tracks, and screen-edge clipping.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [
+    50.4501,
+    30.5234
+  ],
+  "map_radius_km": 30,
+  "watch_radius_km": 45,
+  "steps": [
+    {
+      "at": 0,
+      "phase": "icons_grid",
+      "label": "all-types",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "markers_min": 8,
+        "markers_max": 8,
+        "basemap": true
+      }
+    },
+    {
+      "at": 10,
+      "phase": "icons_advisory",
+      "label": "grey-advisories",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "markers_min": 8,
+        "markers_max": 8,
+        "basemap": true
+      },
+      "press": "short"
+    },
+    {
+      "at": 20,
+      "phase": "icons_stale",
+      "label": "stale-no-heading",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "markers_min": 8,
+        "markers_max": 8,
+        "basemap": true
+      }
+    },
+    {
+      "at": 30,
+      "phase": "icons_edges",
+      "label": "screen-edges",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "sound": "none",
+        "markers_min": 8,
+        "markers_max": 8,
+        "basemap": true
+      }
+    }
+  ]
+}

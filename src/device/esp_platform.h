@@ -23,12 +23,14 @@ class EspTransport final : public core::Transport, private core::ByteSource {
   bool write(const char* data, size_t length) override;
   core::ByteSource& input() override { return *this; }
   void close() override;
+  core::ReadEnd read_end() const override { return read_end_; }
 
  private:
   static constexpr uint32_t kIdleTimeoutMs = 5000;
   static constexpr uint32_t kConnectTimeoutMs = 2000;  // the gateway is on the LAN
 
   int read() override;
+  core::ReadEnd read_end_ = core::ReadEnd::None;
 
   WiFiClient client_;
   bool open_ = false;

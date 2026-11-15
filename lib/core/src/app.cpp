@@ -21,6 +21,16 @@ uint32_t add_saturating(uint32_t a, uint32_t b) { return a > kNever - 1 - b ? kN
 
 }  // namespace
 
+const char* read_end_name(ReadEnd reason) {
+  switch (reason) {
+    case ReadEnd::None: return "none";
+    case ReadEnd::Closed: return "closed";
+    case ReadEnd::Timeout: return "timeout";
+    case ReadEnd::Error: return "error";
+  }
+  return "error";
+}
+
 const char* sound_name(Sound sound) {
   switch (sound) {
     case Sound::None:
@@ -201,6 +211,23 @@ void App::accept_snapshot() {
 }
 
 FetchOutcome App::fetch(Request request) {
+  const uint32_t started = time_.millis();
+  TransferStatus transfer;
+  transfer.outcome = fetch_body(request, transfer);
+  transfer.duration_ms = time_.millis() - started;
+  if (request == Request::Basemap) {
+    basemap_status_.last = transfer;
+    if (transfer.outcome == FetchOutcome::Ok) {
+      ++basemap_status_.successes;
+    } else {
+      ++basemap_status_.failures;
+      basemap_status_.last_failure = transfer;
+    }
+  }
+  return transfer.outcome;
+}
+
+FetchOutcome App::fetch_body(Request request, TransferStatus& transfer) {
   const bool snapshot = request == Request::Snapshot;
   const Url& url = snapshot ? snapshot_url_ : basemap_url_;
   uint8_t* buffer = snapshot ? reply_ : basemap_body_;
@@ -228,23 +255,32 @@ FetchOutcome App::fetch(Request request) {
   } else {
     LimitedSource head_input(transport_.input(), kMaxHeadBytes);
     ResponseHead head;
-    status_.last_http_status = 0;
-    if (read_response_head(head_input, head) != HeadResult::Ok) {
+    if (snapshot) {
+      status_.last_http_status = 0;
+    }
+    const HeadResult head_result = read_response_head(head_input, head);
+    transfer.http_status = static_cast<int16_t>(head.status);
+    transfer.expected_bytes = head.content_length;
+    if (head_result != HeadResult::Ok) {
       outcome = FetchOutcome::BadHead;
     } else {
-      status_.last_http_status = head.status;
+      if (snapshot) {
+        status_.last_http_status = head.status;
+      }
       if (head.status != 200) {
         outcome = FetchOutcome::HttpError;
       } else if (head.content_length < 0 || static_cast<size_t>(head.content_length) > capacity) {
         outcome = FetchOutcome::TooLarge;
       } else {
         length = transport_.input().readBytes(reinterpret_cast<char*>(buffer), static_cast<size_t>(head.content_length));
+        transfer.received_bytes = static_cast<uint32_t>(length);
         if (length != static_cast<size_t>(head.content_length)) {
           outcome = FetchOutcome::Truncated;
         }
       }
     }
   }
+  transfer.read_end = transport_.read_end();
   transport_.close();
   if (outcome != FetchOutcome::Ok) {
     return outcome;
@@ -252,7 +288,10 @@ FetchOutcome App::fetch(Request request) {
   const WireResult result = snapshot ? decode_snapshot(buffer, length, settings_.key, nonce, snapshot_)
                                      : basemap_.load(buffer, length, settings_.key, nonce);
   if (result != WireResult::Ok) {
-    status_.last_rejection = result;
+    transfer.rejection = result;
+    if (snapshot) {
+      status_.last_rejection = result;
+    }
     return FetchOutcome::Rejected;
   }
   return FetchOutcome::Ok;

@@ -12,6 +12,9 @@
 
 namespace core {
 
+enum class ReadEnd : uint8_t { None, Closed, Timeout, Error };
+const char* read_end_name(ReadEnd reason);
+
 // A byte pipe to one server. The clock wraps WiFiClient, the PC build wraps sockets.
 class Transport {
  public:
@@ -19,6 +22,7 @@ class Transport {
   virtual bool write(const char* data, size_t length) = 0;
   virtual ByteSource& input() = 0;  // response bytes; -1 at close or timeout
   virtual void close() = 0;
+  virtual ReadEnd read_end() const = 0;
 
  protected:
   ~Transport() = default;
@@ -70,6 +74,23 @@ enum class FetchOutcome : uint8_t {
 };
 const char* fetch_outcome_name(FetchOutcome outcome);
 
+struct TransferStatus {
+  FetchOutcome outcome = FetchOutcome::None;
+  int16_t http_status = 0;
+  WireResult rejection = WireResult::Ok;
+  ReadEnd read_end = ReadEnd::None;
+  int32_t expected_bytes = -1;
+  uint32_t received_bytes = 0;
+  uint32_t duration_ms = 0;
+};
+
+struct BasemapStatus {
+  TransferStatus last;
+  TransferStatus last_failure;
+  uint32_t successes = 0;
+  uint32_t failures = 0;
+};
+
 struct GatewayStatus {
   FetchOutcome last_outcome = FetchOutcome::None;
   int last_http_status = 0;
@@ -99,6 +120,7 @@ class App {
   Sound take_sound();
 
   const GatewayStatus& status() const { return status_; }
+  const BasemapStatus& basemap_status() const { return basemap_status_; }
   const Snapshot& snapshot() const { return snapshot_; }
   const Basemap& basemap() const { return basemap_; }
   // Seconds since the last valid reply; kNever before the first.
@@ -110,6 +132,7 @@ class App {
   uint64_t advance_uptime();
   bool recent(uint32_t now) const;
   FetchOutcome fetch(Request request);
+  FetchOutcome fetch_body(Request request, TransferStatus& transfer);
   void accept_snapshot();
 
   Settings settings_;
@@ -128,6 +151,7 @@ class App {
   uint32_t last_request_ms_ = 0;
   RequestBuffer request_;
   GatewayStatus status_;
+  BasemapStatus basemap_status_;
   Snapshot snapshot_;
   Basemap basemap_;
   AlertTracker tracker_;

@@ -32,9 +32,11 @@ class SocketTransport final : public core::Transport, private core::ByteSource {
   bool write(const char* data, size_t length) override;
   core::ByteSource& input() override { return *this; }
   void close() override;
+  core::ReadEnd read_end() const override { return read_end_; }
 
  private:
   int read() override;
+  core::ReadEnd read_end_ = core::ReadEnd::None;
 
   int fd_ = -1;
   char buffer_[4096];

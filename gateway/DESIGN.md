@@ -187,6 +187,18 @@ pytest fails while that file is out of date with the encoder.
   `/debug/state` reports heap, the gateway source's last outcome, successes, failures, MAC or
   nonce rejections and seconds since the last valid reply, and the basemap version and
   validity, and the alert duration shown.
+- **Basemap diagnostics.** `/debug/state` keeps snapshot health under `gateway` and reports
+  basemap transfer health separately under `basemap`: outcome, HTTP status, wire rejection,
+  read termination (`none`, `closed`, `timeout` or `error`), expected and received body bytes,
+  total duration in milliseconds, and success/failure counts. `expected_bytes` is −1 until a
+  content length is known. `last_failure` preserves the latest failed transfer across a
+  successful retry. A failed map download leaves the map invalid until the next successful
+  retry; the retry interval remains 30 seconds.
+- **Threat symbols.** The map and nearest-track card distinguish UAVs (delta wing), FPV
+  drones (four rotors), reconnaissance (eye), missiles (rocket), ballistic threats (bolt),
+  guided bombs (bomb), aircraft (plane), and unknown types (question mark). The glyph stays
+  upright; a separate outer pointer shows bearing and is omitted when heading is unknown.
+  Advisories remain hollow grey and stale symbols fade. Generic card states use a dot.
 - **Paths.** Reported history is a bright two-pixel solid line with a dark outline, fading
   by point order toward its oldest end. The estimated segment from reported position to
   predicted marker is dashed. Uncertainty circles are subdued; advisories stay grey.

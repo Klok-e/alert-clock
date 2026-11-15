@@ -119,7 +119,27 @@ STATIONARY_TRACK = track("no-speed", "uav", 0, 10, heading=90, quality="approx",
 STATIONARY_TRACK.pop("velocity")
 STATIONARY_TRACK["trail"] = [MOTION_TRACK["trail"][0], MOTION_TRACK["trail"][6]]
 
+ICON_KINDS = ("uav", "fpv", "recon", "missile", "ballistic", "kab", "mig31k", "unknown")
+
+
+def icon_grid(advisory=False, stale=False, edges=False):
+    result = []
+    for i, kind in enumerate(ICON_KINDS):
+        x = (-2 if i % 2 == 0 else 242) if edges else 48 + (i % 4) * 48
+        y = 65 + (i // 2) * 40 if edges else 75 + (i // 4) * 85
+        bearing = math.degrees(math.atan2(x - 120, 120 - y)) % 360
+        km = math.hypot(x - 120, y - 120) / 4
+        heading = None if stale or advisory or kind == "unknown" else (i * 45) % 360
+        result.append(track("icon_" + kind, kind, bearing, km, heading=heading, speed=0,
+                            advisory=advisory, status="stale" if stale else "active"))
+    return result
+
+
 PHASES = {
+    "icons_grid": {"threats": icon_grid(), "alerts": QUIET_ALERTS},
+    "icons_advisory": {"threats": icon_grid(advisory=True), "alerts": QUIET_ALERTS},
+    "icons_stale": {"threats": icon_grid(stale=True), "alerts": QUIET_ALERTS},
+    "icons_edges": {"threats": icon_grid(edges=True), "alerts": QUIET_ALERTS},
     "motion_paths": {"threats": [MOTION_TRACK],
                      "alerts": {"raions": [], "oblasts": [KYIV_CITY("red")]}},
     "missing_speed": {"threats": [STATIONARY_TRACK], "alerts": QUIET_ALERTS},
@@ -147,6 +167,11 @@ PHASES = {
     "missing_level": {"threats": [], "alerts": {"raions": [
         entry("вишгородський", "Вишгородський район", "Київська область", None)], "oblasts": [FAR_ALERT]}},
 }
+
+for i, kind in enumerate(ICON_KINDS):
+    PHASES["icon_card_" + kind] = {
+        "threats": [track("card_" + kind, kind, 45, 35, heading=None if kind == "unknown" else i * 45,
+                          speed=0)], "alerts": QUIET_ALERTS}
 
 
 def box(south, west, north, east):

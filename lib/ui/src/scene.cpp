@@ -259,34 +259,100 @@ int16_t draw_pill(Canvas& c, int32_t x, int32_t top, Banner banner, bool short_l
   return static_cast<int16_t>(width);
 }
 
-// A filled disc with an arrow along the heading, or a dot when the heading is unknown.
-void draw_badge(Canvas& c, int32_t x, int32_t y, int16_t heading_deg, Rgb fill, bool hollow, uint16_t ground) {
-  if (!c.touches(y - kBadgeRadius - 1, 2 * kBadgeRadius + 3)) {
-    return;
-  }
+uint16_t draw_badge_disc(Canvas& c, int32_t x, int32_t y, Rgb fill, bool hollow,
+                         bool stale, uint16_t ground) {
   const uint16_t color = to565(fill);
-  const bool bright = 30 * fill.r + 59 * fill.g + 11 * fill.b > 14000;  // luma above ~140
-  const uint16_t glyph = hollow ? color : (bright ? kBackground : kWhite);
+  const bool bright = 30 * fill.r + 59 * fill.g + 11 * fill.b > 14000;
+  const uint16_t light = stale ? to565(mix(kWhiteRgb, kNavy, 50)) : kWhite;
   if (hollow) {
     c.g.fillCircle(x, c.y(y), kBadgeRadius + 1, ground);
     c.g.drawCircle(x, c.y(y), kBadgeRadius, color);
   } else {
-    c.g.fillCircle(x, c.y(y), kBadgeRadius + 1, bright ? ground : kWhite);
+    c.g.fillCircle(x, c.y(y), kBadgeRadius + 1, bright ? ground : light);
     c.g.fillCircle(x, c.y(y), kBadgeRadius, color);
   }
-  if (heading_deg < 0) {
+  return hollow ? color : (bright ? kBackground : light);
+}
+
+void draw_status_badge(Canvas& c, int32_t x, int32_t y, Rgb fill, uint16_t ground) {
+  if (c.touches(y - kBadgeRadius - 1, 2 * kBadgeRadius + 3)) {
+    const uint16_t glyph = draw_badge_disc(c, x, y, fill, false, false, ground);
     c.g.fillCircle(x, c.y(y), 2, glyph);
+  }
+}
+
+// Glyphs stay upright: the separate pointer carries bearing without rotating the silhouette.
+void draw_kind_glyph(Canvas& c, int32_t x, int32_t y, ThreatKind kind, uint16_t ink) {
+  const int32_t cy = c.y(y);
+  switch (kind) {
+    case ThreatKind::Uav:
+      c.g.fillTriangle(x, cy - 5, x - 5, cy + 4, x + 5, cy + 4, ink);
+      c.g.drawFastVLine(x, cy + 3, 3, ink);
+      break;
+    case ThreatKind::Recon:
+      c.g.drawEllipse(x, cy, 5, 3, ink);
+      c.g.fillCircle(x, cy, 1, ink);
+      break;
+    case ThreatKind::Fpv:
+      c.g.drawLine(x - 3, cy - 3, x + 3, cy + 3, ink);
+      c.g.drawLine(x - 3, cy + 3, x + 3, cy - 3, ink);
+      c.g.drawCircle(x - 3, cy - 3, 2, ink);
+      c.g.drawCircle(x + 3, cy - 3, 2, ink);
+      c.g.drawCircle(x - 3, cy + 3, 2, ink);
+      c.g.drawCircle(x + 3, cy + 3, 2, ink);
+      break;
+    case ThreatKind::Missile:
+      c.g.fillTriangle(x, cy - 5, x - 1, cy - 2, x + 1, cy - 2, ink);
+      c.g.fillRect(x - 1, cy - 2, 3, 6, ink);
+      c.g.drawLine(x - 1, cy + 1, x - 3, cy + 4, ink);
+      c.g.drawLine(x + 1, cy + 1, x + 3, cy + 4, ink);
+      break;
+    case ThreatKind::Ballistic:
+      c.g.fillTriangle(x + 1, cy - 5, x - 4, cy + 1, x + 1, cy + 1, ink);
+      c.g.fillTriangle(x - 1, cy - 1, x + 4, cy - 1, x - 1, cy + 5, ink);
+      break;
+    case ThreatKind::Kab:
+      c.g.fillTriangle(x - 3, cy - 5, x + 3, cy - 5, x, cy - 1, ink);
+      c.g.fillEllipse(x, cy + 1, 3, 4, ink);
+      break;
+    case ThreatKind::Aircraft:
+      c.g.fillRect(x - 1, cy - 5, 3, 10, ink);
+      c.g.fillTriangle(x, cy - 2, x - 5, cy + 1, x + 5, cy + 1, ink);
+      c.g.drawFastHLine(x - 3, cy + 4, 7, ink);
+      break;
+    case ThreatKind::Unknown:
+      c.g.drawLine(x - 2, cy - 4, x + 2, cy - 4, ink);
+      c.g.drawLine(x + 2, cy - 4, x + 3, cy - 3, ink);
+      c.g.drawLine(x + 3, cy - 3, x + 3, cy - 1, ink);
+      c.g.drawLine(x + 3, cy - 1, x, cy + 1, ink);
+      c.g.drawFastVLine(x, cy + 1, 2, ink);
+      c.g.drawPixel(x, cy + 5, ink);
+      break;
+  }
+}
+
+void draw_threat_badge(Canvas& c, int32_t x, int32_t y, ThreatKind kind,
+                       int16_t heading_deg, Rgb fill, bool hollow, bool stale, uint16_t ground) {
+  constexpr int32_t kExtent = 11;
+  if (!c.touches(y - kExtent, 2 * kExtent + 1)) {
+    return;
+  }
+  const uint16_t glyph = draw_badge_disc(c, x, y, fill, hollow, stale, ground);
+  draw_kind_glyph(c, x, y, kind, glyph);
+  if (heading_deg < 0) {
     return;
   }
   const float heading = static_cast<float>(heading_deg) * 3.14159265f / 180.0f;
-  const float wing = 2.5f;  // about 143 degrees, in radians
-  const int32_t tip_x = x + static_cast<int32_t>(std::lround(5.0f * std::sin(heading)));
-  const int32_t tip_y = y - static_cast<int32_t>(std::lround(5.0f * std::cos(heading)));
-  const int32_t left_x = x + static_cast<int32_t>(std::lround(4.0f * std::sin(heading + wing)));
-  const int32_t left_y = y - static_cast<int32_t>(std::lround(4.0f * std::cos(heading + wing)));
-  const int32_t right_x = x + static_cast<int32_t>(std::lround(4.0f * std::sin(heading - wing)));
-  const int32_t right_y = y - static_cast<int32_t>(std::lround(4.0f * std::cos(heading - wing)));
-  c.g.fillTriangle(tip_x, c.y(tip_y), left_x, c.y(left_y), right_x, c.y(right_y), glyph);
+  const float dx = std::sin(heading);
+  const float dy = -std::cos(heading);
+  const int32_t tip_x = x + static_cast<int32_t>(std::lround(11.0f * dx));
+  const int32_t tip_y = y + static_cast<int32_t>(std::lround(11.0f * dy));
+  const int32_t base_x = x + static_cast<int32_t>(std::lround(9.0f * dx));
+  const int32_t base_y = y + static_cast<int32_t>(std::lround(9.0f * dy));
+  const int32_t side_x = static_cast<int32_t>(std::lround(2.0f * dy));
+  const int32_t side_y = static_cast<int32_t>(std::lround(-2.0f * dx));
+  c.g.fillTriangle(tip_x, c.y(tip_y), base_x + side_x, c.y(base_y + side_y),
+                   base_x - side_x, c.y(base_y - side_y), to565(fill));
 }
 
 void draw_time(Canvas& c, const ViewModel& view, int32_t baseline) {
@@ -324,7 +390,7 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
   Rgb badge = kGreyRgb;
   uint16_t title_color = kWhite;
   int16_t heading = -1;
-  bool hollow = false;
+  bool nearest = false;
   if (!view.threats_fresh) {
     format_age(age, sizeof(age), view.threats_age_s);
     flash_format(title, sizeof(title), kCardStaleTitle, age);
@@ -346,7 +412,7 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
     flash_format(detail, sizeof(detail), s.nearest_advisory ? kCardNearestAdvisory : kCardNearestTrack, km);
     badge = marker_rgb(s.nearest_kind, s.nearest_advisory, s.nearest_stale, kCardRgb);
     heading = s.nearest_heading_deg;
-    hollow = s.nearest_advisory;
+    nearest = true;
   } else {
     format_age(age, sizeof(age), view.threats_age_s);
     flash_copy(title, sizeof(title), kCardClearTitle);
@@ -356,7 +422,12 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
 
   c.g.fillRoundRect(kLeft, c.y(top), kWidth, kHeight, 10, kCard);
   c.g.drawRoundRect(kLeft, c.y(top), kWidth, kHeight, 10, kLine);
-  draw_badge(c, kLeft + 22, top + kHeight / 2, heading, badge, hollow, kCard);
+  if (nearest) {
+    draw_threat_badge(c, kLeft + 22, top + kHeight / 2, s.nearest_kind, heading, badge,
+                       s.nearest_advisory, s.nearest_stale, kCard);
+  } else {
+    draw_status_badge(c, kLeft + 22, top + kHeight / 2, badge, kCard);
+  }
   c.ram_text(title, kLeft + 40, top + 22, &kInterTitle, title_color, lgfx::textdatum_t::baseline_left);
   c.ram_text(detail, kLeft + 40, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);
 }
@@ -563,8 +634,9 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   // Farthest first, so the nearest track is drawn on top.
   for (size_t i = s.markers.size(); i-- > 0;) {
     const Marker& marker = s.markers[i];
-    draw_badge(c, marker.point.x, marker.point.y, marker.heading_deg,
-               marker_rgb(marker.kind, marker.advisory, marker.stale, ground_rgb), marker.advisory, kBackground);
+    draw_threat_badge(c, marker.point.x, marker.point.y, marker.kind, marker.heading_deg,
+                      marker_rgb(marker.kind, marker.advisory, marker.stale, ground_rgb),
+                      marker.advisory, marker.stale, kBackground);
   }
 
   // Top: the banner pill, the time pill and north.

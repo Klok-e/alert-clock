@@ -42,6 +42,7 @@ void EspTransport::begin() { client_.setTimeout(kConnectTimeoutMs); }
 
 bool EspTransport::connect(const core::Url& url) {
   close();
+  read_end_ = core::ReadEnd::None;
   if (url.tls || WiFi.status() != WL_CONNECTED) {
     return false;
   }
@@ -66,24 +67,25 @@ int EspTransport::read() {
     return buffer_[position_++];
   }
   if (!open_) {
+    read_end_ = core::ReadEnd::Closed;
     return -1;
   }
   const uint32_t start = ::millis();
   for (;;) {
-    const int available = client_.available();
-    if (available > 0) {
-      const size_t want = static_cast<size_t>(available) < sizeof(buffer_) ? static_cast<size_t>(available)
-                                                                            : sizeof(buffer_);
-      const int got = client_.read(buffer_, want);
-      if (got > 0) {
-        buffered_ = static_cast<size_t>(got);
-        position_ = 1;
-        return buffer_[0];
-      }
-    } else if (!client_.connected()) {
+    // Sample closure before reading so bytes delivered with FIN are drained before EOF.
+    const bool connected = client_.connected();
+    const int got = client_.read(buffer_, sizeof(buffer_));
+    if (got > 0) {
+      buffered_ = static_cast<size_t>(got);
+      position_ = 1;
+      return buffer_[0];
+    }
+    if (!connected) {
+      read_end_ = core::ReadEnd::Closed;
       return -1;
     }
     if (::millis() - start >= kIdleTimeoutMs) {
+      read_end_ = core::ReadEnd::Timeout;
       return -1;
     }
     delay(1);  // lets Wi-Fi run and feeds the watchdog

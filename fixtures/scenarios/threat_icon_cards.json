@@ -1,0 +1,116 @@
+{
+  "description": "The nearest-track card uses the same distinct symbol for each threat type.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [
+    50.4501,
+    30.5234
+  ],
+  "map_radius_km": 30,
+  "watch_radius_km": 25,
+  "steps": [
+    {
+      "at": 0,
+      "phase": "icon_card_uav",
+      "label": "uav",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 10,
+      "phase": "icon_card_fpv",
+      "label": "fpv",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 20,
+      "phase": "icon_card_recon",
+      "label": "recon",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 30,
+      "phase": "icon_card_missile",
+      "label": "missile",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 40,
+      "phase": "icon_card_ballistic",
+      "label": "ballistic",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 50,
+      "phase": "icon_card_kab",
+      "label": "kab",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 60,
+      "phase": "icon_card_mig31k",
+      "label": "mig31k",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    },
+    {
+      "at": 70,
+      "phase": "icon_card_unknown",
+      "label": "unknown",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "markers_max": 1,
+        "basemap": true,
+        "markers_min": 1
+      }
+    }
+  ]
+}

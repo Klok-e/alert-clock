@@ -41,6 +41,7 @@ SocketTransport::~SocketTransport() { close(); }
 
 bool SocketTransport::connect(const core::Url& url) {
   close();
+  read_end_ = core::ReadEnd::None;
   if (url.tls) {
     return false;
   }
@@ -91,6 +92,7 @@ int SocketTransport::read() {
     return static_cast<unsigned char>(buffer_[position_++]);
   }
   if (fd_ < 0) {
+    read_end_ = core::ReadEnd::Closed;
     return -1;
   }
   for (;;) {
@@ -99,7 +101,9 @@ int SocketTransport::read() {
       continue;
     }
     if (n <= 0) {
-      return -1;  // closed, error or timeout
+      read_end_ = n == 0 ? core::ReadEnd::Closed
+                        : (errno == EAGAIN || errno == EWOULDBLOCK ? core::ReadEnd::Timeout : core::ReadEnd::Error);
+      return -1;
     }
     buffered_ = n;
     position_ = 1;
