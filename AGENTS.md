@@ -53,3 +53,6 @@ their auth are listed in `src/device/service.h`.
   configured like the one `tools/run_scenarios.py` writes, but with `listen = "0.0.0.0"` and
   the clock's `CLOCK_GATEWAY_KEY`; then point the clock at it with
   `POST /debug/sources?gateway=<PC address>:<port>`.
+
+## Temp files
+Use the ignored .tmp directory for temp files. Don't clutter the filesystem outside this repo with project files.
