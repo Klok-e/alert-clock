@@ -9,3 +9,5 @@ __pycache__/
 # The gateway's virtualenv (gateway/install.sh) and pytest cache
 gateway/.venv/
 .pytest_cache/
+# Local scratch files: firmware backups, camera frames
+.tmp/
