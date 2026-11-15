@@ -8,7 +8,7 @@
 #include "alerts.h"
 #include "sha256.h"
 
-// The gateway protocol, version 3: gateway/PROTOCOL.md.
+// The gateway protocol, version 4: gateway/PROTOCOL.md.
 namespace core {
 
 enum class ThreatKind : uint8_t { Uav, Recon, Fpv, Missile, Ballistic, Kab, Aircraft, Unknown };
@@ -30,8 +30,10 @@ constexpr uint32_t kDurationUnknown = 0xFFFFFFFF;
 
 struct Marker {
   ScreenPoint point;
+  ScreenPoint anchor;  // reported position before prediction
   int16_t heading_deg = -1;  // -1 when unknown
   ThreatKind kind = ThreatKind::Unknown;
+  bool predicted = false;
   bool approximate = false;
   bool stale = false;
   bool advisory = false;  // an observation, never a shelter signal

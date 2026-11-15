@@ -113,6 +113,25 @@ int check_expectations(int step, JsonObjectConst expect, const core::ViewModel& 
                       std::to_string(minutes));
   }
   const int markers = static_cast<int>(app.snapshot().markers.size());
+  if (JsonObjectConst first = expect["first_marker"].as<JsonObjectConst>(); !first.isNull()) {
+    if (markers == 0) {
+      failures += check(step, "first_marker", "present", "absent");
+    } else {
+      const core::Marker& marker = app.snapshot().markers[0];
+      for (const auto& field : {std::pair<const char*, int>{"x", marker.point.x},
+                                {"y", marker.point.y}, {"anchor_x", marker.anchor.x},
+                                {"anchor_y", marker.anchor.y}, {"trail_count", marker.trail_count}}) {
+        if (first[field.first].is<int>()) {
+          failures += check(step, field.first, std::to_string(first[field.first].as<int>()),
+                            std::to_string(field.second));
+        }
+      }
+      if (first["predicted"].is<bool>()) {
+        failures += check(step, "predicted", first["predicted"].as<bool>() ? "yes" : "no",
+                          marker.predicted ? "yes" : "no");
+      }
+    }
+  }
   if (expect["markers_min"].is<int>() && markers < expect["markers_min"].as<int>()) {
     std::printf("FAIL step %d: markers expected >= %d, got %d\n", step, expect["markers_min"].as<int>(), markers);
     ++failures;

@@ -9,8 +9,10 @@ from datetime import datetime
 from . import geo
 from .wire import KIND_UNKNOWN, KINDS, MAX_MARKERS, MAX_TRAIL, Marker
 
-MAX_EXTRAPOLATION_S = 300
-TRAIL_WINDOW_S = 300
+# Indexed by wire.KINDS; NEPTUN SDK prediction limits.
+FLY_HORIZON_S = (720, 720, 600, 300, 90, 240, 360, 360)
+MAX_GHOST_KM = (18, 12, 10, 30, 20, 10, 24, 10)
+TRAIL_WINDOW_S = 900
 OFFSCREEN_MARGIN_PX = 24
 MAX_UNCERTAINTY_PX = 200
 KEEP_FACTOR = 1.5  # tracks within 1.5 x the map radius count as nearby
@@ -60,10 +62,11 @@ def parse_track(item: dict) -> Track | None:
         return None
     kind_name = _KIND_ALIASES.get(item.get("type"), item.get("type"))
     velocity = item.get("velocity") if isinstance(item.get("velocity"), dict) else {}
-    heading = _number(velocity.get("bearingDeg"))
-    if heading is None:
-        heading = _number(item.get("heading"))
-    speed = _number(velocity.get("speedKmh")) or 0.0
+    bearing = _number(velocity.get("bearingDeg"))
+    confirmed = parse_time(item.get("confirmedAt"))
+    moving = item.get("status") == "active" and confirmed is not None and bearing is not None
+    heading = bearing if moving else _number(item.get("heading"))
+    speed = (_number(velocity.get("speedKmh")) or 0.0) if moving else 0.0
     trail = []
     for point in item.get("trail") or []:
         if isinstance(point, dict):
@@ -76,7 +79,7 @@ def parse_track(item: dict) -> Track | None:
         lat=lat, lon=lon,
         heading=-1 if heading is None else round(heading % 360) % 360,
         speed_kmh=max(0.0, min(speed, 20000.0)),
-        observed=parse_time(item.get("confirmedAt")) or parse_time(item.get("updatedAt")),
+        observed=confirmed,
         uncertainty_km=max(0.0, min(_number(item.get("uncertaintyKm")) or 0.0, 500.0)),
         approximate=item.get("positionQuality") == "approx",
         stale=item.get("status") == "stale",
@@ -89,11 +92,12 @@ def parse_track(item: dict) -> Track | None:
 
 
 def predicted(track: Track, now: float) -> tuple[float, float]:
-    """Dead reckoning along heading and speed from the observed time, capped at 300 s."""
-    if track.heading < 0 or track.speed_kmh <= 0 or not track.observed or now <= track.observed:
+    """NEPTUN prediction, bounded by the threat type's time and distance limits."""
+    if track.heading < 0 or track.speed_kmh <= 0 or track.observed is None or now <= track.observed:
         return (track.lat, track.lon)
-    elapsed = min(now - track.observed, MAX_EXTRAPOLATION_S)
-    return geo.destination((track.lat, track.lon), track.heading, track.speed_kmh * elapsed / 3600)
+    elapsed = min(now - track.observed, FLY_HORIZON_S[track.kind])
+    distance = min(MAX_GHOST_KM[track.kind], track.speed_kmh * elapsed / 3600)
+    return geo.destination((track.lat, track.lon), track.heading, distance)
 
 
 @dataclass
@@ -130,13 +134,17 @@ def build(tracks: list[Track], home: tuple[float, float], map_radius_km: float, 
         if not (-OFFSCREEN_MARGIN_PX <= x <= geo.SCREEN + OFFSCREEN_MARGIN_PX
                 and -OFFSCREEN_MARGIN_PX <= y <= geo.SCREEN + OFFSCREEN_MARGIN_PX):
             continue
-        trail = [p for p in track.trail if now - TRAIL_WINDOW_S <= p[2] <= now][-MAX_TRAIL:]
+        trail = [p for p in track.trail if now - TRAIL_WINDOW_S <= p[2] <= now]
+        if len(trail) > MAX_TRAIL:
+            trail = [trail[round(i * (len(trail) - 1) / (MAX_TRAIL - 1))] for i in range(MAX_TRAIL)]
+        anchor = projection.project((track.lat, track.lon))
         uncertainty = 0
         if track.approximate and track.uncertainty_km > 0:
             uncertainty = min(MAX_UNCERTAINTY_PX, round(track.uncertainty_km * projection.px_per_km))
         picture.markers.append(Marker(
             x, y, track.heading, track.kind, track.approximate, track.stale, track.advisory, uncertainty,
-            [projection.project((lat, lon)) for lat, lon, _ in trail]))
+            [projection.project((lat, lon)) for lat, lon, _ in trail],
+            anchor if anchor != (x, y) else None))
         if len(picture.markers) == MAX_MARKERS:
             break
     return picture

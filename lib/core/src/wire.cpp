@@ -3,12 +3,12 @@
 namespace core {
 namespace {
 
-constexpr uint8_t kVersion = 3;
+constexpr uint8_t kVersion = 4;
 constexpr uint8_t kTypeSnapshot = 1;
 constexpr uint8_t kTypeBasemap = 2;
 constexpr size_t kHeaderBytes = 6;
 constexpr size_t kSnapshotFixedBytes = 31;
-constexpr size_t kMarkerBytes = 10;
+constexpr size_t kMarkerBytes = 14;
 constexpr size_t kTrailPointBytes = 4;
 constexpr size_t kBasemapFixedBytes = 4 + 32 + 2 * kScreenPx + 2;
 constexpr uint16_t kNoDistance = 0xFFFF;
@@ -222,9 +222,12 @@ WireResult decode_snapshot(const uint8_t* body, size_t length, const GatewayKey&
     Marker m;
     m.point.x = in.i16();
     m.point.y = in.i16();
+    m.anchor.x = in.i16();
+    m.anchor.y = in.i16();
     m.heading_deg = in.i16();
     m.kind = kind_from(in.u8());
     const uint8_t marker_flags = in.u8();
+    m.predicted = (marker_flags & 8) != 0;
     m.approximate = (marker_flags & 1) != 0;
     m.stale = (marker_flags & 2) != 0;
     m.advisory = (marker_flags & 4) != 0;

@@ -64,6 +64,9 @@ void test_snapshot_from_the_gateway_decodes_field_for_field() {
   const Marker& missile = s.markers[0];
   TEST_ASSERT_EQUAL(130, missile.point.x);
   TEST_ASSERT_EQUAL(95, missile.point.y);
+  TEST_ASSERT_TRUE(missile.predicted);
+  TEST_ASSERT_EQUAL(135, missile.anchor.x);
+  TEST_ASSERT_EQUAL(90, missile.anchor.y);
   TEST_ASSERT_EQUAL(225, missile.heading_deg);
   TEST_ASSERT_TRUE(missile.stale);
   TEST_ASSERT_FALSE(missile.advisory);
@@ -75,6 +78,9 @@ void test_snapshot_from_the_gateway_decodes_field_for_field() {
   const Marker& drone = s.markers[1];
   TEST_ASSERT_EQUAL(-5, drone.point.x);  // off-screen positions keep their sign
   TEST_ASSERT_EQUAL(250, drone.point.y);
+  TEST_ASSERT_FALSE(drone.predicted);
+  TEST_ASSERT_EQUAL(-5, drone.anchor.x);
+  TEST_ASSERT_EQUAL(250, drone.anchor.y);
   TEST_ASSERT_EQUAL(-1, drone.heading_deg);
   TEST_ASSERT_EQUAL_STRING("uav", threat_kind_name(drone.kind));
   TEST_ASSERT_TRUE(drone.approximate);
@@ -113,7 +119,7 @@ void test_altered_or_replayed_snapshots_never_change_the_picture() {
 void test_signed_snapshot_with_counts_that_disagree_with_its_length_is_malformed() {
   std::vector<uint8_t> message = bytes(fixtures::kSnapshot, sizeof(fixtures::kSnapshot));
   constexpr size_t kMarkerCount = 6 + 31 - 1;
-  constexpr size_t kFirstTrailCount = 6 + 31 + 9;
+  constexpr size_t kFirstTrailCount = 6 + 31 + 13;
   Snapshot s;
   for (const auto& [offset, value] : {std::pair<size_t, uint8_t>{kMarkerCount, 1},
                                       std::pair<size_t, uint8_t>{kMarkerCount, 3},

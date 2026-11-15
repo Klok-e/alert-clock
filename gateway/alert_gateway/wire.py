@@ -8,7 +8,7 @@ import struct
 import zlib
 from dataclasses import dataclass, field
 
-VERSION = 3
+VERSION = 4
 TYPE_SNAPSHOT = 1
 TYPE_BASEMAP = 2
 MAC_BYTES = 32
@@ -39,6 +39,7 @@ class Marker:
     advisory: bool = False
     uncertainty_px: int = 0
     trail: list[tuple[int, int]] = field(default_factory=list)
+    anchor: tuple[int, int] | None = None  # reported position when the marker is predicted
 
 
 @dataclass
@@ -105,7 +106,10 @@ def encode_snapshot(snapshot: Snapshot, nonce: int, key: bytes) -> bytes:
     for m in snapshot.markers[:MAX_MARKERS]:
         trail = m.trail[-MAX_TRAIL:]
         flags = (1 if m.approximate else 0) | (2 if m.stale else 0) | (4 if m.advisory else 0)
-        out += struct.pack("<hhhBBBB", _i16(m.x), _i16(m.y), m.heading, m.kind, flags,
+        anchor = m.anchor if m.anchor is not None else (m.x, m.y)
+        flags |= 8 if anchor != (m.x, m.y) else 0
+        out += struct.pack("<hhhhhBBBB", _i16(m.x), _i16(m.y), _i16(anchor[0]), _i16(anchor[1]),
+                           m.heading, m.kind, flags,
                            _clamp(m.uncertainty_px, 0, 255), len(trail))
         for x, y in trail:
             out += struct.pack("<hh", _i16(x), _i16(y))
@@ -190,11 +194,12 @@ def decode_snapshot(message: bytes, key: bytes, nonce: int) -> Snapshot:
                  bool(nearest_flags & 1), bool(nearest_flags & 2))
     position = 6 + struct.calcsize("<BBHHIIHB3BHHHBhBB")
     for _ in range(count):
-        x, y, heading, k, f, unc, trail_count = struct.unpack_from("<hhhBBBB", body, position)
-        position += 10
+        x, y, ax, ay, heading, k, f, unc, trail_count = struct.unpack_from("<hhhhhBBBB", body, position)
+        position += 14
         trail = [struct.unpack_from("<hh", body, position + 4 * i) for i in range(trail_count)]
         position += 4 * trail_count
-        s.markers.append(Marker(x, y, heading, k, bool(f & 1), bool(f & 2), bool(f & 4), unc, trail))
+        s.markers.append(Marker(x, y, heading, k, bool(f & 1), bool(f & 2), bool(f & 4), unc, trail,
+                                (ax, ay) if f & 8 else None))
     if position != len(body):
         raise ValueError("length mismatch")
     return s

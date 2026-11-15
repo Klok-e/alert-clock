@@ -110,7 +110,19 @@ FAR_ALERT = entry("луганська", "Луганська область", "Л
 KYIV_CITY = lambda level: entry("м. київ", "м. Київ", "м. Київ", level)  # noqa: E731
 QUIET_ALERTS = {"raions": [], "oblasts": [FAR_ALERT]}
 
+MOTION_TRACK = track("motion", "uav", 0, 10, heading=90, quality="approx", uncertainty=6)
+MOTION_TRACK["trail"] = []
+for i in range(11):
+    lat, lon = destination(*HOME, 300 + i * 6, 22 - i * 1.2)
+    MOTION_TRACK["trail"].append({"lat": lat, "lon": lon, "t": iso(OBSERVED_UNIX - (10 - i) * 60)})
+STATIONARY_TRACK = track("no-speed", "uav", 0, 10, heading=90, quality="approx", uncertainty=6)
+STATIONARY_TRACK.pop("velocity")
+STATIONARY_TRACK["trail"] = [MOTION_TRACK["trail"][0], MOTION_TRACK["trail"][6]]
+
 PHASES = {
+    "motion_paths": {"threats": [MOTION_TRACK],
+                     "alerts": {"raions": [], "oblasts": [KYIV_CITY("red")]}},
+    "missing_speed": {"threats": [STATIONARY_TRACK], "alerts": QUIET_ALERTS},
     "quiet": {"threats": far_tracks(12), "alerts": QUIET_ALERTS},
     "drones_near": {"threats": far_tracks(12) + NEAR_DRONES,
                     "alerts": {"raions": [], "oblasts": [FAR_ALERT, KYIV_CITY("yellow")]}},

@@ -1,4 +1,4 @@
-# Clock ↔ gateway protocol, version 3
+# Clock ↔ gateway protocol, version 4
 
 Plain HTTP/1.0 on the gateway's port (default 8080). Every value is little-endian. Every reply
 body ends with a 32-byte HMAC-SHA256 over all bytes before it, keyed with the shared 32-byte
@@ -15,7 +15,7 @@ change to either side, rerun it (a pytest fails until you do).
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| 0 | u8 | version = 3 |
+| 0 | u8 | version = 4 |
 | 1 | u8 | type: 1 snapshot, 2 basemap |
 | 2 | u32 | nonce, echoed from the request's `n` parameter (8 hex digits) |
 
@@ -39,14 +39,18 @@ change to either side, rerun it (a pytest fails until you do).
 | u8 | nearest track flags: bit 0 advisory, bit 1 stale |
 | u8 | marker count (0–24), then the markers |
 
-Marker: i16 x, i16 y (screen pixels, home at 120, 120), i16 heading (−1 unknown), u8 kind,
-u8 flags (bit 0 approximate, bit 1 stale, bit 2 advisory), u8 uncertainty radius in px,
+Marker: i16 x, i16 y (displayed screen pixels, home at 120, 120),
+i16 anchor x, i16 anchor y (reported position before prediction), i16 heading (−1 unknown), u8 kind,
+u8 flags (bit 0 approximate, bit 1 stale, bit 2 advisory, bit 3 predicted), u8 uncertainty radius in px,
 u8 trail count (0–6), then trail count × (i16 x, i16 y), oldest first.
+The anchor equals the displayed position when there is no prediction.
+Reported trails end at the anchor; the segment from anchor to displayed position is estimated
+and drawn dashed only when the predicted flag is set.
 
 Kinds follow `core::ThreatKind`: 0 uav, 1 recon, 2 fpv, 3 missile, 4 ballistic, 5 kab,
 6 aircraft, 7 unknown.
 
-A snapshot with 24 markers of 6 trail points is 885 bytes (6 header + 31 fixed + 24 × 34 + 32 MAC); the clock's buffer is 1,024.
+A snapshot with 24 markers of 6 trail points is 981 bytes (6 header + 31 fixed + 24 × 38 + 32 MAC); the clock's buffer is 1,024.
 
 ## `GET /v1/basemap?n=<nonce>` → type 2
 

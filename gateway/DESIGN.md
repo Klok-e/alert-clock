@@ -81,8 +81,10 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
 - **Tracks** from `/api/v1/threats`:
   - tracks with status `resolved` are ignored everywhere;
   - each track's position is dead-reckoned to the reply time from its observed time along its
-    velocity bearing and speed, capped at 300 s; distances are from home to that position, and
-    counts, nearest and markers all use it;
+    velocity bearing and speed, bounded by NEPTUN’s per-type time and distance caps;
+    distances are from home to that position, and
+    counts, nearest and markers all use it. Prediction requires an active track, a readable
+    `confirmedAt`, and velocity bearing and speed; otherwise the reported coordinates stay fixed;
   - counts cover every other track in the feed: `threats_in_watch` is non-advisory,
     non-`areaOnly` tracks within the watch radius; `area_only_in_region` is `areaOnly` tracks
     whose `regionKey` equals the home oblast's key, or whose `region` equals the home oblast
@@ -90,8 +92,9 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
     nearest non-`areaOnly` track within 1.5 × the map radius (advisory or not, with its
     advisory flag);
   - markers: non-`areaOnly` tracks are projected to signed 16-bit screen pixels; those more than
-    24 px outside the screen are dropped; the 24 nearest of the rest are sent. Each carries the
-    newest 6 points of NEPTUN's `trail` field timestamped within 5 min before the reply time,
+    24 px outside the screen are dropped; the 24 nearest of the rest are sent. Each carries
+    up to 6 points sampled evenly by point order from NEPTUN's `trail` field within
+    15 min before the reply time, preserving the oldest and newest retained points,
     also projected, and an uncertainty radius (approximate tracks only, `uncertaintyKm` ×
     `px_per_km`, capped at 200 px). The clock clips what it draws;
   - a marker's `stale` flag is NEPTUN's per-track status `stale` (drawn faded); it is unrelated
@@ -115,8 +118,9 @@ pytest fails while that file is out of date with the encoder.
   duration; the
   basemap version; the map scale (`px_per_km`) and up to 3 ring radii in km; the counts and
   nearest-track fields (distance, kind, heading, advisory, stale); and up to 24 markers, each
-  with x, y, heading, kind, flags (approximate, stale, advisory), uncertainty radius in pixels
-  and up to 6 trail points. A whole reply is at most 885 bytes and fits the clock's 1 KB buffer.
+  with x, y, heading, kind, flags (approximate, stale, advisory), uncertainty radius in pixels,
+  a reported-position anchor, a prediction flag, and up to 6 trail points. A whole reply is at
+  most 981 bytes and fits the clock's 1 KB buffer.
 - `GET /v1/basemap?n=<nonce>` returns the basemap message (header with version and palette, row
   table, rows, MAC), at most 20,480 bytes in all. The basemap version is the CRC-32 of the
   encoded rows and palette, so any content change, including a Pi restart or a late Overpass
@@ -183,6 +187,9 @@ pytest fails while that file is out of date with the encoder.
   `/debug/state` reports heap, the gateway source's last outcome, successes, failures, MAC or
   nonce rejections and seconds since the last valid reply, and the basemap version and
   validity, and the alert duration shown.
+- **Paths.** Reported history is a bright two-pixel solid line with a dark outline, fading
+  by point order toward its oldest end. The estimated segment from reported position to
+  predicted marker is dashed. Uncertainty circles are subdued; advisories stay grey.
 - **Alert pill.** A Yellow or Red pill adds the alert duration (the gateway's value plus the time
   since the last valid reply) in its two largest units: "Загроза · 23 хв", "Тривога · 1 год 23 хв",
   "Тривога · 2 д 3 год", "<1 хв" under a minute; "Повітряна тривога" shortens to "Тривога". Where

@@ -1,0 +1,132 @@
+{
+  "description": "Reported history remains distinct from capped prediction; missing velocity leaves markers stationary.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [
+    50.4501,
+    30.5234
+  ],
+  "map_radius_km": 30,
+  "watch_radius_km": 25,
+  "steps": [
+    {
+      "at": 0,
+      "phase": "missing_speed",
+      "label": "reported-only",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 120,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": false,
+          "trail_count": 2
+        }
+      }
+    },
+    {
+      "at": 30,
+      "phase": "missing_speed",
+      "label": "still-no-speed",
+      "expect": {
+        "panel": "map",
+        "banner": "none",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 120,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": false,
+          "trail_count": 2
+        }
+      }
+    },
+    {
+      "at": 60,
+      "phase": "motion_paths",
+      "label": "moving",
+      "expect": {
+        "panel": "map",
+        "banner": "red",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 135,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": true,
+          "trail_count": 6
+        }
+      }
+    },
+    {
+      "at": 330,
+      "phase": "motion_paths",
+      "label": "past-five-minutes",
+      "expect": {
+        "panel": "map",
+        "banner": "red",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 180,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": true,
+          "trail_count": 6
+        }
+      }
+    },
+    {
+      "at": 570,
+      "phase": "motion_paths",
+      "label": "distance-capped",
+      "expect": {
+        "panel": "map",
+        "banner": "red",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 192,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": true,
+          "trail_count": 6
+        }
+      }
+    },
+    {
+      "at": 750,
+      "phase": "motion_paths",
+      "label": "prediction-stopped",
+      "expect": {
+        "panel": "map",
+        "banner": "red",
+        "markers_min": 1,
+        "markers_max": 1,
+        "basemap": true,
+        "first_marker": {
+          "x": 192,
+          "y": 80,
+          "anchor_x": 120,
+          "anchor_y": 80,
+          "predicted": true,
+          "trail_count": 3
+        }
+      }
+    }
+  ]
+}

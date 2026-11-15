@@ -28,7 +28,7 @@ def snapshot(basemap_version):
         nearest_stale=True,
         markers=[
             wire.Marker(130, 95, 225, wire.KINDS.index("missile"), stale=True, uncertainty_px=0,
-                        trail=[(160, 60), (150, 72), (140, 84)]),
+                        trail=[(160, 60), (150, 72), (140, 84)], anchor=(135, 90)),
             wire.Marker(-5, 250, -1, wire.KINDS.index("uav"), approximate=True, advisory=True,
                         uncertainty_px=40),
         ])

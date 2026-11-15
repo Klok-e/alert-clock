@@ -444,17 +444,89 @@ bool draw_basemap(Canvas& c, const core::Basemap* basemap) {
   return true;
 }
 
-void draw_trail(Canvas& c, const Marker& marker, uint16_t color) {
-  core::ScreenPoint from = marker.point;
-  for (uint8_t i = marker.trail_count; i-- > 0;) {
-    const core::ScreenPoint to = marker.trail[i];
-    const int32_t top = from.y < to.y ? from.y : to.y;
-    const int32_t height = (from.y < to.y ? to.y - from.y : from.y - to.y) + 1;
-    if (c.touches(top, height)) {
-      c.g.drawLine(from.x, c.y(from.y), to.x, c.y(to.y), color);
-    }
-    from = to;
+bool clip_track_axis(float start, float delta, float low, float high, float& first, float& last) {
+  if (delta == 0.0f) {
+    return start >= low && start <= high;
   }
+  const float a = (low - start) / delta;
+  const float b = (high - start) / delta;
+  first = std::fmax(first, std::fmin(a, b));
+  last = std::fmin(last, std::fmax(a, b));
+  return first <= last;
+}
+
+void draw_track_line(Canvas& c, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+                     uint16_t color) {
+  const float delta_x = static_cast<float>(x1) - x0;
+  const float delta_y = static_cast<float>(y1) - y0;
+  float first = 0.0f;
+  float last = 1.0f;
+  if (!clip_track_axis(x0, delta_x, -2, kSize + 1, first, last) ||
+      !clip_track_axis(y0, delta_y, -2, kSize + 1, first, last)) {
+    return;
+  }
+  // Bound raster work to the screen; every strip uses the same clipped endpoints.
+  x1 = static_cast<int32_t>(std::lround(x0 + delta_x * last));
+  y1 = static_cast<int32_t>(std::lround(y0 + delta_y * last));
+  x0 = static_cast<int32_t>(std::lround(x0 + delta_x * first));
+  y0 = static_cast<int32_t>(std::lround(y0 + delta_y * first));
+  const int32_t top = y0 < y1 ? y0 : y1;
+  const int32_t bottom = y0 > y1 ? y0 : y1;
+  if (!c.touches(top - 1, bottom - top + 4) || (x0 == x1 && y0 == y1)) {
+    return;
+  }
+  const int32_t dx = x0 < x1 ? x1 - x0 : x0 - x1;
+  const int32_t dy = y0 < y1 ? y1 - y0 : y0 - y1;
+  for (int offset = -1; offset <= 2; ++offset) {
+    const int32_t ox = dy > dx ? offset : 0;
+    const int32_t oy = dy > dx ? 0 : offset;
+    c.g.drawLine(x0 + ox, c.y(y0 + oy), x1 + ox, c.y(y1 + oy), kBackground);
+  }
+  for (int offset = 0; offset <= 1; ++offset) {
+    const int32_t ox = dy > dx ? offset : 0;
+    const int32_t oy = dy > dx ? 0 : offset;
+    c.g.drawLine(x0 + ox, c.y(y0 + oy), x1 + ox, c.y(y1 + oy), color);
+  }
+}
+
+void draw_prediction(Canvas& c, const Marker& marker, Rgb color) {
+  const float dx = static_cast<float>(marker.point.x) - marker.anchor.x;
+  const float dy = static_cast<float>(marker.point.y) - marker.anchor.y;
+  if (!marker.predicted || (dx == 0.0f && dy == 0.0f)) {
+    return;
+  }
+  float first = 0.0f;
+  float last = 1.0f;
+  if (!clip_track_axis(marker.anchor.x, dx, -2, kSize + 1, first, last) ||
+      !clip_track_axis(marker.anchor.y, dy, c.top - 2, c.top + c.g.height() + 1, first, last)) {
+    return;
+  }
+  const float length = std::sqrt(dx * dx + dy * dy);
+  // Dash positions use the original anchor, so clipping each strip preserves their phase.
+  const int32_t first_dash = static_cast<int32_t>(std::floor(first * length / 9.0f));
+  const int32_t last_dash = static_cast<int32_t>(std::floor(last * length / 9.0f));
+  for (int32_t i = first_dash; i <= last_dash; ++i) {
+    const float begin = static_cast<float>(i) * 9.0f / length;
+    const float end = std::fmin(1.0f, (static_cast<float>(i) * 9.0f + 4.0f) / length);
+    draw_track_line(c, static_cast<int32_t>(std::lround(marker.anchor.x + dx * begin)),
+                    static_cast<int32_t>(std::lround(marker.anchor.y + dy * begin)),
+                    static_cast<int32_t>(std::lround(marker.anchor.x + dx * end)),
+                    static_cast<int32_t>(std::lround(marker.anchor.y + dy * end)),
+                    to565(mix(kNavy, color, 75)));
+  }
+}
+
+void draw_trail(Canvas& c, const Marker& marker, Rgb color) {
+  const size_t count = marker.trail_count < core::kMaxTrail ? marker.trail_count : core::kMaxTrail;
+  for (size_t i = 0; i < count; ++i) {
+    const core::ScreenPoint from = marker.trail[i];
+    const core::ScreenPoint to = i + 1 < count ? marker.trail[i + 1]
+                                             : (marker.predicted ? marker.anchor : marker.point);
+    const int brightness = 40 + static_cast<int>(60 * (i + 1) / count);
+    draw_track_line(c, from.x, from.y, to.x, to.y,
+                    to565(mix(kNavy, mix(color, kWhiteRgb, 20), brightness)));
+  }
+  draw_prediction(c, marker, color);
 }
 
 void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
@@ -478,9 +550,9 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
     const Rgb color = marker_rgb(marker.kind, marker.advisory, marker.stale, ground_rgb);
     const int32_t r = marker.uncertainty_px;
     if (r > kBadgeRadius && c.touches(marker.point.y - r, 2 * r + 1)) {
-      c.g.drawCircle(marker.point.x, c.y(marker.point.y), r, to565(mix(ground_rgb, color, 55)));
+      c.g.drawCircle(marker.point.x, c.y(marker.point.y), r, to565(mix(ground_rgb, color, 25)));
     }
-    draw_trail(c, marker, to565(mix(ground_rgb, color, 60)));
+    draw_trail(c, marker, color);
   }
 
   if (c.touches(kCenter - 6, 13)) {
