@@ -5,9 +5,7 @@
 namespace core {
 namespace {
 
-constexpr size_t kMaxLine = 255;
-constexpr int kMaxHeaderLines = 64;
-using Line = etl::string<kMaxLine>;
+using Line = RequestBuffer;
 
 bool starts_with(const char* text, const char* prefix) {
   return std::strncmp(text, prefix, std::strlen(prefix)) == 0;
@@ -42,36 +40,6 @@ bool name_equals(const Line& line, size_t name_length, const char* expected) {
     }
   }
   return true;
-}
-
-enum class LineResult : uint8_t { Ok, Closed, Truncated };
-
-// Reads up to LF and strips a trailing CR. A line longer than the buffer is read to its
-// end and reported as Truncated.
-LineResult read_line(ByteSource& in, Line& line) {
-  line.clear();
-  bool truncated = false;
-  for (;;) {
-    const int c = in.read();
-    if (c < 0) {
-      return LineResult::Closed;
-    }
-    if (c == '\n') {
-      break;
-    }
-    if (line.full()) {
-      truncated = true;
-    } else {
-      line.push_back(static_cast<char>(c));
-    }
-  }
-  if (truncated) {
-    return LineResult::Truncated;
-  }
-  if (!line.empty() && line.back() == '\r') {
-    line.pop_back();
-  }
-  return LineResult::Ok;
 }
 
 bool parse_content_length(const Line& line, size_t begin, int32_t& out) {
@@ -184,35 +152,48 @@ bool build_get_request(const Url& url, const RequestOptions& options, RequestBuf
   return append(out, "\r\nUser-Agent: alert-clock/0.2\r\nConnection: close\r\n\r\n");
 }
 
-HeadResult read_response_head(ByteSource& in, ResponseHead& head) {
-  head = ResponseHead{};
-  Line line;
-  const LineResult status_line = read_line(in, line);
-  if (status_line == LineResult::Closed) {
-    return HeadResult::Closed;
-  }
-  // "HTTP/1.x SSS reason"
-  if (status_line == LineResult::Truncated || line.size() < 12 || line.compare(0, 7, "HTTP/1.") != 0 ||
-      line[8] != ' ' || (line.size() > 12 && line[12] != ' ')) {
+void HeadParser::reset(RequestBuffer& line) {
+  head_ = ResponseHead{};
+  bytes_ = 0;
+  lines_ = 0;
+  overlong_ = false;
+  status_ = false;
+  length_seen_ = false;
+  line.clear();
+}
+
+HeadResult HeadParser::feed(RequestBuffer& line, uint8_t byte) {
+  if (++bytes_ > 4096) {
     return HeadResult::Malformed;
   }
-  int status = 0;
-  for (size_t i = 9; i < 12; ++i) {
-    if (line[i] < '0' || line[i] > '9') {
+  if (byte != '\n') {
+    if (line.full()) {
+      overlong_ = true;
+    } else {
+      line.push_back(static_cast<char>(byte));
+    }
+    return HeadResult::Pending;
+  }
+  if (++lines_ > 65) {
+    return HeadResult::Malformed;
+  }
+  if (!line.empty() && line.back() == '\r') {
+    line.pop_back();
+  }
+  if (!status_) {
+    if (overlong_ || line.size() < 12 || line.compare(0, 7, "HTTP/1.") != 0 ||
+        (line[7] != '0' && line[7] != '1') || line[8] != ' ' ||
+        (line.size() > 12 && line[12] != ' ')) {
       return HeadResult::Malformed;
     }
-    status = status * 10 + (line[i] - '0');
-  }
-  head.status = status;
-
-  for (int count = 0; count < kMaxHeaderLines; ++count) {
-    const LineResult result = read_line(in, line);
-    if (result == LineResult::Closed) {
-      return HeadResult::Closed;
+    for (size_t i = 9; i < 12; ++i) {
+      if (line[i] < '0' || line[i] > '9') {
+        return HeadResult::Malformed;
+      }
+      head_.status = head_.status * 10 + line[i] - '0';
     }
-    if (result == LineResult::Truncated) {
-      continue;
-    }
+    status_ = true;
+  } else if (!overlong_) {
     if (line.empty()) {
       return HeadResult::Ok;
     }
@@ -227,18 +208,24 @@ HeadResult read_response_head(ByteSource& in, ResponseHead& head) {
     while (value < line.size() && (line[value] == ' ' || line[value] == '\t')) {
       ++value;
     }
-    size_t end = line.size();
-    while (end > value && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
-      --end;
+    while (line.size() > value && (line.back() == ' ' || line.back() == '\t')) {
+      line.pop_back();
     }
-    line.resize(end);
     if (name_equals(line, colon, "content-length")) {
-      if (!parse_content_length(line, value, head.content_length)) {
+      int32_t length = -1;
+      if (!parse_content_length(line, value, length) ||
+          (length_seen_ && length != head_.content_length)) {
         return HeadResult::Malformed;
       }
+      head_.content_length = length;
+      length_seen_ = true;
+    } else if (name_equals(line, colon, "transfer-encoding")) {
+      return HeadResult::Malformed;
     }
   }
-  return HeadResult::Malformed;
+  line.clear();
+  overlong_ = false;
+  return HeadResult::Pending;
 }
 
 }  // namespace core

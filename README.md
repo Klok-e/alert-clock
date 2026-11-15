@@ -57,6 +57,29 @@ region ("areaOnly") are never drawn; the clock counts the ones in your oblast.
 After three crashes in a row the clock starts in safe mode: only Wi-Fi, firmware
 upload and the debug service run, so a bad build can always be replaced over Wi-Fi.
 
+## Light and sound
+
+Open `/settings` on the clock and sign in as `admin` with the same password used for
+Wi-Fi setup and firmware uploads. Day and night each have screen brightness, LED intensity,
+and separate start, escalation and all-clear sound toggles. LED intensity scales the status
+colours; 100% retains their normal intensity. The daily schedule uses Kyiv local time and can
+cross midnight. Its default is 23:00–10:00, with a 5% screen, 5% LED and silent automatic
+notifications at night; day defaults are 80%, 100% and all three sounds enabled.
+Before time sync, the clock uses the night profile, including startup messages.
+
+Save persists both profiles and the schedule without restarting. Preview tests unsaved values
+without changing alert state or stored settings. Explicit sound previews are audible even
+when the selected sound or night sounds are disabled. One preview runs at a time, for at
+most three seconds. Live events continue to arrive; after the preview, the clock restores
+its current status and plays only a still-relevant, enabled pending sound. Previews are
+unavailable in safe mode.
+
+The LED pulses on alert start or escalation, then holds its status colour; it fades off on
+clear and double-flashes amber every five seconds for missing data. Raised and escalation
+sounds retain their distinct patterns; all-clear is a short 1,400 Hz chirp. `/debug/state`
+reports the intended output values as well as gateway health. Physical light and sound must
+be checked on the clock.
+
 ## Development
 
 `AGENTS.md` holds the development loop (unit tests, PC scenarios, clock build) and
@@ -105,5 +128,3 @@ against the mock. Not yet verified:
 - display orientation, colour order and the 240×240 offset (`kRotation` in `src/device/main.cpp`)
 - button polarity: active low with an external pull-up is assumed
 - heap headroom on the clock (`heap.free` in `/debug/state`)
-
-Not built yet: night dimming.

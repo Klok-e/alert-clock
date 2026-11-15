@@ -1,0 +1,107 @@
+{
+  "description": "Fragmented gateway transfers leave output patterns advancing; night boundaries mute automatic sounds without replay.",
+  "start": "2026-11-14T19:00:00Z",
+  "steps": [
+    {
+      "at": 0,
+      "phase": "quiet",
+      "expect": {
+        "panel": "clock",
+        "banner": "none",
+        "sound": "none",
+        "screen_percent": 80,
+        "night": false
+      }
+    },
+    {
+      "at": 30,
+      "phase": "drones_near",
+      "network": "slow_basemap",
+      "run_ms": 2000,
+      "expect": {
+        "banner": "yellow",
+        "sound": "raised",
+        "basemap": true,
+        "buzzer_hz_seen": 2730,
+        "buzzer_off": true,
+        "led_changes_min": 10,
+        "tick_ms_max": 100,
+        "led_changes_fetching_min": 5
+      }
+    },
+    {
+      "at": 60,
+      "phase": "alert_red",
+      "network": "slow_snapshot",
+      "run_ms": 2200,
+      "expect": {
+        "banner": "red",
+        "sound": "escalated",
+        "buzzer_hz_seen": 2730,
+        "buzzer_off": true,
+        "led_changes_min": 10,
+        "tick_ms_max": 100
+      }
+    },
+    {
+      "at": 90,
+      "phase": "quiet",
+      "run_ms": 500,
+      "expect": {
+        "banner": "none",
+        "sound": "cleared",
+        "buzzer_hz_seen": 1400,
+        "buzzer_off": true,
+        "led_changes_min": 5
+      }
+    },
+    {
+      "at": 7199,
+      "label": "before-night",
+      "expect": {
+        "screen_percent": 80,
+        "night": false
+      }
+    },
+    {
+      "at": 7200,
+      "label": "night-start",
+      "expect": {
+        "screen_percent": 5,
+        "night": true
+      }
+    },
+    {
+      "at": 7230,
+      "phase": "drones_near",
+      "run_ms": 1500,
+      "expect": {
+        "banner": "yellow",
+        "sound": "raised",
+        "screen_percent": 5,
+        "buzzer_hz_absent": 2730,
+        "buzzer_off": true,
+        "led_changes_min": 5
+      }
+    },
+    {
+      "at": 46799,
+      "label": "before-day",
+      "expect": {
+        "screen_percent": 5,
+        "night": true
+      }
+    },
+    {
+      "at": 46800,
+      "label": "day-start-no-replay",
+      "expect": {
+        "screen_percent": 80,
+        "night": false,
+        "sound": "none",
+        "buzzer_hz_absent": 2730,
+        "buzzer_off": true
+      }
+    }
+  ]
+}

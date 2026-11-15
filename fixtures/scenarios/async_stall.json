@@ -1,0 +1,50 @@
+{
+  "description": "A gateway body stall expires while the NoData LED animation keeps advancing, then recovers.",
+  "start": "2026-11-14T19:00:00Z",
+  "steps": [
+    {
+      "at": 0,
+      "phase": "quiet",
+      "network": "stall_snapshot",
+      "expect": {
+        "banner": "nodata",
+        "sound": "none",
+        "outcome": "truncated",
+        "basemap": false,
+        "led_changes_min": 10,
+        "buzzer_off": true,
+        "tick_ms_max": 100,
+        "led_changes_fetching_min": 5
+      }
+    },
+    {
+      "at": 10,
+      "label": "recovered",
+      "expect": {
+        "banner": "none",
+        "outcome": "ok",
+        "basemap": true
+      }
+    },
+    {
+      "at": 20,
+      "phase": "alert_red",
+      "network": "truncate_basemap",
+      "expect": {
+        "banner": "red",
+        "sound": "raised",
+        "outcome": "ok",
+        "basemap": false
+      }
+    },
+    {
+      "at": 51,
+      "label": "basemap-retry",
+      "expect": {
+        "banner": "red",
+        "outcome": "ok",
+        "basemap": true
+      }
+    }
+  ]
+}

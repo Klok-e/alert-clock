@@ -5,7 +5,6 @@
 
 #include <etl/string.h>
 
-#include "byte_source.h"
 
 namespace core {
 
@@ -35,10 +34,22 @@ struct ResponseHead {
   int32_t content_length = -1;  // -1 when absent
 };
 
-enum class HeadResult : uint8_t { Ok, Closed, Malformed };
+enum class HeadResult : uint8_t { Pending, Ok, Malformed };
 
-// Reads the status line and headers, stopping after the blank line. Header lines
-// longer than the line buffer are skipped, not fatal (servers send long cookies).
-HeadResult read_response_head(ByteSource& in, ResponseHead& head);
+// The request buffer becomes the header line buffer once the request is sent.
+class HeadParser {
+ public:
+  void reset(RequestBuffer& line);
+  HeadResult feed(RequestBuffer& line, uint8_t byte);
+  const ResponseHead& head() const { return head_; }
+
+ private:
+  ResponseHead head_;
+  uint16_t bytes_ = 0;
+  uint8_t lines_ = 0;
+  bool overlong_ = false;
+  bool status_ = false;
+  bool length_seen_ = false;
+};
 
 }  // namespace core

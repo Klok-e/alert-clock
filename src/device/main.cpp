@@ -8,6 +8,7 @@
 #include "board.h"
 #include "config.h"
 #include "esp_platform.h"
+#include "device_store.h"
 #include "flash.h"
 #include "fonts.h"
 #include "outputs.h"
@@ -23,7 +24,6 @@ constexpr uint32_t kWifiWaitMs = 20000;
 constexpr uint32_t kFrameMs = 1000;
 constexpr uint32_t kHealthyAfterMs = 60000;
 constexpr uint8_t kRotation = 0;    // check on the device; the supplier stores it in EEPROM
-constexpr uint8_t kBrightness = 80;  // percent
 
 constexpr uint32_t kNoticeMs = 4000;
 
@@ -48,8 +48,9 @@ core::App app(make_settings(), time_source, transport, random_source);
 core::ViewModel view;
 core::ButtonDetector button;
 Outputs outputs;
+core::OutputController output_controller(outputs);
 SafeMode safe_mode;
-Service service(app, view, safe_mode);
+Service service(app, view, safe_mode, output_controller);
 uint32_t last_frame_ms = 0;
 uint32_t notice_from_ms = 0;  // the start-up notice shows for kNoticeMs from here
 bool notice_done = false;
@@ -132,16 +133,18 @@ void setup() {
   outputs.begin();
 
   display.init();
+  // SPI initialization claims GPIO12 as MISO; the LED must reclaim it afterward.
+  outputs.begin_led();
   display.setRotation(kRotation);
   display.fillScreen(0);
-  outputs.set_backlight(kBrightness);
+  gateway_store::begin();
+  output_controller.configure(output_store::load(), millis());
+  output_controller.observe(false, 0, core::Banner::NoData, core::Sound::None, millis());
   band.setBuffer(band_pixels, core::kScreenPx, ui::kBandHeight, 16);
 
   show_message(kConnecting, "");
   connect_wifi();
   configTime(kTimeZone, "pool.ntp.org", "time.google.com");
-  transport.begin();
-  gateway_store::begin();
   if (!app.set_gateway(gateway_store::load())) {
     Serial.println("No gateway address: set it on /wifi.");
   }
@@ -179,23 +182,20 @@ void loop() {
     last_frame_ms = now - kFrameMs;  // redraw right away
   }
 
-  // A fetch blocks the loop for seconds and only update() ends a note, so a pattern
-  // finishes (at most ~2 s) before the next fetch starts.
-  if (!outputs.busy()) {
-    app.tick();
-  }
-  outputs.play(app.take_sound());
-
+  app.tick();
+  output_controller.gateway_advanced();
+  app.build_view(view);
   const uint32_t after = millis();
+  output_controller.observe(view.time_valid,
+      static_cast<uint16_t>(view.local.hour * 60 + view.local.minute),
+      view.banner, app.take_sound(), after);
   if (after - last_frame_ms >= kFrameMs) {
     last_frame_ms = after;
-    app.build_view(view);
     if (!notice_done && after - notice_from_ms >= kNoticeMs) {
       notice_done = true;
     }
     view.notice = !notice_done;
     ui::render(display, band, view);
-    outputs.show_banner(view.banner);
   }
-  outputs.update(after);
+  output_controller.update(millis());
 }

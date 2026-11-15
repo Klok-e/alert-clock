@@ -15,12 +15,20 @@ namespace core {
 enum class ReadEnd : uint8_t { None, Closed, Timeout, Error };
 const char* read_end_name(ReadEnd reason);
 
-// A byte pipe to one server. The clock wraps WiFiClient, the PC build wraps sockets.
+enum class LinkState : uint8_t { Pending, Ready, Failed };
+enum class IoState : uint8_t { Pending, Progress, End, Failed };
+struct IoResult {
+  IoState state = IoState::Pending;
+  size_t count = 0;
+};
+
+// Every operation returns without waiting for network progress.
 class Transport {
  public:
-  virtual bool connect(const Url& url) = 0;
-  virtual bool write(const char* data, size_t length) = 0;
-  virtual ByteSource& input() = 0;  // response bytes; -1 at close or timeout
+  virtual bool begin(const Url& url, uint32_t now) = 0;
+  virtual LinkState advance(uint32_t now) = 0;
+  virtual IoResult write_some(const uint8_t* data, size_t length) = 0;
+  virtual IoResult read_some(uint8_t* data, size_t capacity) = 0;
   virtual void close() = 0;
   virtual ReadEnd read_end() const = 0;
 
@@ -50,7 +58,6 @@ class Random {
 struct Settings {
   GatewayKey key = {};
   uint32_t poll_ms = 2000;
-  // After a failed poll or basemap download: each failure can block the loop for seconds.
   uint32_t retry_ms = 10000;
   uint32_t basemap_retry_ms = 30000;
   uint32_t silent_ms = 60000;      // no valid reply for this long: both sources count as stale
@@ -101,11 +108,13 @@ struct GatewayStatus {
   bool ever_valid = false;
 };
 
+bool valid_gateway_address(const char* address);
+
 class App {
  public:
   App(const Settings& settings, TimeSource& time, Transport& transport, Random& random);
 
-  // Runs at most one request per call: a pending basemap, else a due snapshot.
+  // Advances at most 256 bytes without waiting for network progress.
   void tick();
   void press(ButtonEvent event);
   // Polls the gateway at the next tick, even while backing off after a failure.
@@ -117,6 +126,10 @@ class App {
   // The pending sound, cleared by reading it.
   Sound take_sound();
 
+  bool fetching() const { return phase_ != Phase::Idle; }
+  bool settled() const { return !fetching() && !forced_ && !basemap_wanted_; }
+  uint32_t completed_requests() const { return completed_requests_; }
+
   const GatewayStatus& status() const { return status_; }
   const BasemapStatus& basemap_status() const { return basemap_status_; }
   const Snapshot& snapshot() const { return snapshot_; }
@@ -126,11 +139,14 @@ class App {
 
  private:
   enum class Request : uint8_t { Snapshot, Basemap };
+  enum class Phase : uint8_t { Idle, Connect, Write, Head, Body };
+
+  void start(Request request, uint32_t now);
+  void progress(uint32_t now);
+  void finish(FetchOutcome outcome, uint32_t now);
 
   uint64_t advance_uptime();
   bool snapshot_recent() const;
-  FetchOutcome fetch(Request request);
-  FetchOutcome fetch_body(Request request, TransferStatus& transfer);
   void accept_snapshot();
 
   Settings settings_;
@@ -148,6 +164,15 @@ class App {
   uint32_t basemap_failed_at_ = 0;
   uint32_t last_request_ms_ = 0;
   RequestBuffer request_;
+  HeadParser head_parser_;
+  TransferStatus transfer_;
+  Phase phase_ = Phase::Idle;
+  Request active_request_ = Request::Snapshot;
+  uint32_t nonce_ = 0;
+  uint32_t started_ms_ = 0;
+  uint32_t progress_ms_ = 0;
+  uint32_t completed_requests_ = 0;
+  uint16_t written_ = 0;
   GatewayStatus status_;
   BasemapStatus basemap_status_;
   Snapshot snapshot_;

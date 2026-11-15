@@ -8,7 +8,10 @@
 namespace core {
 namespace {
 
-constexpr size_t kMaxHeadBytes = 4096;
+constexpr size_t kTickBytes = 256;
+constexpr uint32_t kConnectMs = 2000;
+constexpr uint32_t kIdleMs = 5000;
+constexpr uint32_t kTotalMs = 10000;
 constexpr const char* kDefaultPort = "8080";
 
 // Saturates below kNever, which means "no data yet".
@@ -18,6 +21,32 @@ uint32_t age_s(uint64_t now_ms, uint64_t then_ms) {
 }
 
 uint32_t add_saturating(uint32_t a, uint32_t b) { return a > kNever - 1 - b ? kNever - 1 : a + b; }
+
+bool gateway_urls(const char* address, Url& snapshot, Url& basemap) {
+  if (address == nullptr || *address == '\0' || std::strlen(address) > 70 ||
+      std::strchr(address, '/') != nullptr) {
+    return false;
+  }
+  const bool has_port = std::strchr(address, ':') != nullptr;
+  etl::string<96> text;
+  text.assign("http://");
+  text.append(address);
+  if (!has_port) {
+    text.append(":");
+    text.append(kDefaultPort);
+  }
+  if (text.full()) {
+    return false;
+  }
+  etl::string<96> basemap_text = text;
+  text.append("/v1/snapshot");
+  basemap_text.append("/v1/basemap");
+  if (text.full() || basemap_text.full() || !parse_url(text.c_str(), snapshot) ||
+      !parse_url(basemap_text.c_str(), basemap)) {
+    return false;
+  }
+  return true;
+}
 
 }  // namespace
 
@@ -80,30 +109,26 @@ App::App(const Settings& settings, TimeSource& time, Transport& transport, Rando
       reply_{},
       basemap_body_{} {}
 
-bool App::set_gateway(const char* address) {
-  if (address == nullptr || *address == '\0' || std::strchr(address, '/') != nullptr) {
-    return false;
-  }
-  const bool has_port = std::strchr(address, ':') != nullptr;
-  etl::string<96> text;
-  text.assign("http://");
-  text.append(address);
-  if (!has_port) {
-    text.append(":");
-    text.append(kDefaultPort);
-  }
-  if (text.full()) {
-    return false;
-  }
-  etl::string<96> basemap_text = text;
-  text.append("/v1/snapshot");
-  basemap_text.append("/v1/basemap");
+bool valid_gateway_address(const char* address) {
   Url snapshot;
   Url basemap;
-  if (text.full() || basemap_text.full() || !parse_url(text.c_str(), snapshot) ||
-      !parse_url(basemap_text.c_str(), basemap)) {
+  return gateway_urls(address, snapshot, basemap);
+}
+
+bool App::set_gateway(const char* address) {
+  Url snapshot;
+  Url basemap;
+  if (!gateway_urls(address, snapshot, basemap)) {
     return false;
   }
+  if (fetching()) {
+    transport_.close();
+    phase_ = Phase::Idle;
+    ++completed_requests_;
+  }
+  basemap_wanted_ = false;
+  basemap_failed_ = false;
+  requested_ = false;
   snapshot_url_ = snapshot;
   basemap_url_ = basemap;
   configured_ = true;
@@ -154,10 +179,13 @@ void App::tick() {
     status_.last_outcome = FetchOutcome::NotConfigured;
     return;
   }
-  if (basemap_wanted_) {
+  if (fetching()) {
+    progress(now);
+    return;
+  }
+  if (basemap_wanted_ && !forced_) {
     basemap_wanted_ = false;
-    basemap_failed_ = fetch(Request::Basemap) != FetchOutcome::Ok;
-    basemap_failed_at_ = now;
+    start(Request::Basemap, now);
     return;
   }
   const uint32_t interval = last_poll_failed_ ? settings_.retry_ms : settings_.poll_ms;
@@ -165,18 +193,7 @@ void App::tick() {
     forced_ = false;
     requested_ = true;
     last_request_ms_ = now;
-    const FetchOutcome outcome = fetch(Request::Snapshot);
-    status_.last_outcome = outcome;
-    last_poll_failed_ = outcome != FetchOutcome::Ok;
-    if (outcome == FetchOutcome::Ok) {
-      ++status_.successes;
-      accept_snapshot();
-    } else {
-      ++status_.failures;
-      if (outcome == FetchOutcome::Rejected) {
-        ++status_.rejections;
-      }
-    }
+    start(Request::Snapshot, now);
   }
 }
 
@@ -196,6 +213,7 @@ void App::accept_snapshot() {
     case AlertChange::None:
       break;
   }
+  basemap_wanted_ = false;
   if (snapshot_.basemap_version == 0) {
     basemap_.invalidate();
   } else if (basemap_.version() != snapshot_.basemap_version &&
@@ -204,91 +222,169 @@ void App::accept_snapshot() {
   }
 }
 
-FetchOutcome App::fetch(Request request) {
-  const uint32_t started = time_.millis();
-  TransferStatus transfer;
-  transfer.outcome = fetch_body(request, transfer);
-  transfer.duration_ms = time_.millis() - started;
-  if (request == Request::Basemap) {
-    basemap_status_.last = transfer;
-    if (transfer.outcome == FetchOutcome::Ok) {
-      ++basemap_status_.successes;
-    } else {
-      ++basemap_status_.failures;
-      basemap_status_.last_failure = transfer;
-    }
-  }
-  return transfer.outcome;
-}
-
-FetchOutcome App::fetch_body(Request request, TransferStatus& transfer) {
+void App::start(Request request, uint32_t now) {
+  active_request_ = request;
+  transfer_ = TransferStatus{};
+  started_ms_ = progress_ms_ = now;
+  written_ = 0;
+  phase_ = Phase::Connect;
   const bool snapshot = request == Request::Snapshot;
-  const Url& url = snapshot ? snapshot_url_ : basemap_url_;
-  uint8_t* buffer = snapshot ? reply_ : basemap_body_;
-  const size_t capacity = snapshot ? sizeof(reply_) : sizeof(basemap_body_);
   if (!snapshot) {
-    basemap_.invalidate();  // the download overwrites the buffer the map is drawn from
+    basemap_.invalidate();
+  } else {
+    status_.last_http_status = 0;
+    status_.last_rejection = WireResult::Ok;
   }
-
-  const uint32_t nonce = random_.next();
+  nonce_ = random_.next();
   char query[16];
-  std::snprintf(query, sizeof(query), "n=%08lx", static_cast<unsigned long>(nonce));
+  std::snprintf(query, sizeof(query), "n=%08lx", static_cast<unsigned long>(nonce_));
   RequestOptions options;
   options.query = query;
+  const Url& url = snapshot ? snapshot_url_ : basemap_url_;
   if (!build_get_request(url, options, request_)) {
-    return FetchOutcome::RequestFailed;
+    finish(FetchOutcome::RequestFailed, now);
+  } else if (!transport_.begin(url, now)) {
+    finish(FetchOutcome::ConnectFailed, now);
   }
-  if (!transport_.connect(url)) {
-    transport_.close();
-    return FetchOutcome::ConnectFailed;
+}
+
+void App::finish(FetchOutcome outcome, uint32_t now) {
+  const bool snapshot = active_request_ == Request::Snapshot;
+  if (transfer_.read_end == ReadEnd::None) {
+    transfer_.read_end = transport_.read_end();
   }
-  FetchOutcome outcome = FetchOutcome::Ok;
-  size_t length = 0;
-  if (!transport_.write(request_.data(), request_.size())) {
-    outcome = FetchOutcome::RequestFailed;
-  } else {
-    LimitedSource head_input(transport_.input(), kMaxHeadBytes);
-    ResponseHead head;
-    if (snapshot) {
-      status_.last_http_status = 0;
+  transport_.close();
+  if (outcome == FetchOutcome::Ok) {
+    const WireResult result = snapshot
+        ? decode_snapshot(reply_, transfer_.received_bytes, settings_.key, nonce_, snapshot_)
+        : basemap_.load(basemap_body_, transfer_.received_bytes, settings_.key, nonce_);
+    if (result != WireResult::Ok) {
+      transfer_.rejection = result;
+      outcome = FetchOutcome::Rejected;
     }
-    const HeadResult head_result = read_response_head(head_input, head);
-    transfer.http_status = static_cast<int16_t>(head.status);
-    transfer.expected_bytes = head.content_length;
-    if (head_result != HeadResult::Ok) {
-      outcome = FetchOutcome::BadHead;
+  }
+  transfer_.outcome = outcome;
+  transfer_.duration_ms = now - started_ms_;
+  phase_ = Phase::Idle;
+  ++completed_requests_;
+  if (snapshot) {
+    status_.last_outcome = outcome;
+    status_.last_http_status = transfer_.http_status;
+    status_.last_rejection = transfer_.rejection;
+    last_poll_failed_ = outcome != FetchOutcome::Ok;
+    if (outcome == FetchOutcome::Ok) {
+      ++status_.successes;
+      accept_snapshot();
     } else {
-      if (snapshot) {
-        status_.last_http_status = head.status;
+      ++status_.failures;
+      if (outcome == FetchOutcome::Rejected) {
+        ++status_.rejections;
       }
-      if (head.status != 200) {
-        outcome = FetchOutcome::HttpError;
-      } else if (head.content_length < 0 || static_cast<size_t>(head.content_length) > capacity) {
-        outcome = FetchOutcome::TooLarge;
-      } else {
-        length = transport_.input().readBytes(reinterpret_cast<char*>(buffer), static_cast<size_t>(head.content_length));
-        transfer.received_bytes = static_cast<uint32_t>(length);
-        if (length != static_cast<size_t>(head.content_length)) {
-          outcome = FetchOutcome::Truncated;
+    }
+  } else {
+    basemap_failed_ = outcome != FetchOutcome::Ok;
+    basemap_failed_at_ = now;
+    basemap_status_.last = transfer_;
+    if (basemap_failed_) {
+      ++basemap_status_.failures;
+      basemap_status_.last_failure = transfer_;
+    } else {
+      ++basemap_status_.successes;
+    }
+  }
+}
+
+void App::progress(uint32_t now) {
+  if (now - started_ms_ >= kTotalMs ||
+      (phase_ == Phase::Connect && now - started_ms_ >= kConnectMs)) {
+    transfer_.read_end = ReadEnd::Timeout;
+    finish(phase_ == Phase::Connect ? FetchOutcome::ConnectFailed
+           : phase_ == Phase::Write ? FetchOutcome::RequestFailed
+           : phase_ == Phase::Head ? FetchOutcome::BadHead : FetchOutcome::Truncated, now);
+    return;
+  }
+  if (phase_ == Phase::Connect) {
+    const LinkState state = transport_.advance(now);
+    if (state == LinkState::Failed) {
+      finish(FetchOutcome::ConnectFailed, now);
+    } else if (state == LinkState::Ready) {
+      phase_ = Phase::Write;
+      progress_ms_ = now;
+    }
+    return;
+  }
+  if (phase_ == Phase::Write) {
+    const size_t remaining = request_.size() - written_;
+    const size_t offered = remaining < kTickBytes ? remaining : kTickBytes;
+    const IoResult result = transport_.write_some(
+        reinterpret_cast<const uint8_t*>(request_.data()) + written_, offered);
+    if (result.state == IoState::Pending) {
+      if (now - progress_ms_ >= kIdleMs) {
+        transfer_.read_end = ReadEnd::Timeout;
+        finish(FetchOutcome::RequestFailed, now);
+      }
+      return;
+    }
+    if (result.state != IoState::Progress || result.count == 0 || result.count > offered) {
+      finish(FetchOutcome::RequestFailed, now);
+      return;
+    }
+    written_ = static_cast<uint16_t>(written_ + result.count);
+    progress_ms_ = now;
+    if (written_ == request_.size()) {
+      head_parser_.reset(request_);
+      phase_ = Phase::Head;
+    }
+    return;
+  }
+  size_t budget = kTickBytes;
+  while (budget != 0 && fetching()) {
+    const bool header = phase_ == Phase::Head;
+    uint8_t byte = 0;
+    uint8_t* body = active_request_ == Request::Snapshot ? reply_ : basemap_body_;
+    const size_t offered = header ? 1 :
+        (static_cast<size_t>(transfer_.expected_bytes) - transfer_.received_bytes < budget
+          ? static_cast<size_t>(transfer_.expected_bytes) - transfer_.received_bytes : budget);
+    const IoResult result = transport_.read_some(header ? &byte : body + transfer_.received_bytes, offered);
+    if (result.state == IoState::Pending) {
+      if (now - progress_ms_ >= kIdleMs) {
+        transfer_.read_end = ReadEnd::Timeout;
+        finish(header ? FetchOutcome::BadHead : FetchOutcome::Truncated, now);
+      }
+      return;
+    }
+    if (result.state != IoState::Progress || result.count == 0 || result.count > offered) {
+      finish(header ? FetchOutcome::BadHead : FetchOutcome::Truncated, now);
+      return;
+    }
+    budget -= result.count;
+    progress_ms_ = now;
+    if (header) {
+      const HeadResult parsed = head_parser_.feed(request_, byte);
+      if (parsed == HeadResult::Malformed) {
+        finish(FetchOutcome::BadHead, now);
+      } else if (parsed == HeadResult::Ok) {
+        const ResponseHead& head = head_parser_.head();
+        transfer_.http_status = static_cast<int16_t>(head.status);
+        transfer_.expected_bytes = head.content_length;
+        const size_t capacity = active_request_ == Request::Snapshot ? sizeof(reply_) : sizeof(basemap_body_);
+        if (head.status != 200) {
+          finish(FetchOutcome::HttpError, now);
+        } else if (head.content_length < 0 || static_cast<size_t>(head.content_length) > capacity) {
+          finish(FetchOutcome::TooLarge, now);
+        } else if (head.content_length == 0) {
+          finish(FetchOutcome::Ok, now);
+        } else {
+          phase_ = Phase::Body;
         }
       }
+    } else {
+      transfer_.received_bytes += static_cast<uint32_t>(result.count);
+      if (transfer_.received_bytes == static_cast<uint32_t>(transfer_.expected_bytes)) {
+        finish(FetchOutcome::Ok, now);
+      }
     }
   }
-  transfer.read_end = transport_.read_end();
-  transport_.close();
-  if (outcome != FetchOutcome::Ok) {
-    return outcome;
-  }
-  const WireResult result = snapshot ? decode_snapshot(buffer, length, settings_.key, nonce, snapshot_)
-                                     : basemap_.load(buffer, length, settings_.key, nonce);
-  if (result != WireResult::Ok) {
-    transfer.rejection = result;
-    if (snapshot) {
-      status_.last_rejection = result;
-    }
-    return FetchOutcome::Rejected;
-  }
-  return FetchOutcome::Ok;
 }
 
 void App::build_view(ViewModel& view) {

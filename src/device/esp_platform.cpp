@@ -1,16 +1,11 @@
 #include "esp_platform.h"
 
-#include <EEPROM.h>
 #include <time.h>
 
 namespace {
 
 // Anything earlier means SNTP has not answered yet (2023-11-14).
 constexpr time_t kMinValidUnix = 1700000000;
-
-constexpr uint32_t kStoreMagic = 0x47575931;  // "GWY1"
-constexpr size_t kStoreBytes = 4 + gateway_store::kMaxAddress + 1;
-char stored_address[gateway_store::kMaxAddress + 1] = "";
 
 }  // namespace
 
@@ -37,102 +32,175 @@ bool EspTime::to_local(int64_t unix_time, core::LocalTime& out) {
   return true;
 }
 
-// WiFiClient::connect waits up to the stream timeout; reads use kIdleTimeoutMs in read().
-void EspTransport::begin() { client_.setTimeout(kConnectTimeoutMs); }
+EspTransport::DnsTicket EspTransport::dns_tickets_[3];
 
-bool EspTransport::connect(const core::Url& url) {
+EspTransport::~EspTransport() {
+  close();
+  for (auto& ticket : dns_tickets_) {
+    if (ticket.owner == this) ticket.owner = nullptr;
+  }
+}
+
+bool EspTransport::begin(const core::Url& url, uint32_t now_ms) {
+  (void)now_ms;
   close();
   read_end_ = core::ReadEnd::None;
-  if (url.tls || WiFi.status() != WL_CONNECTED) {
-    return false;
+  if (url.tls || WiFi.status() != WL_CONNECTED) return false;
+  port_ = url.port;
+  state_ = core::LinkState::Pending;
+  if (ipaddr_aton(url.host.c_str(), &address_)) {
+    address_ready_ = true;
+    return true;
   }
-  if (!client_.connect(url.host.c_str(), url.port)) {
-    client_.stop();
-    return false;
+  for (auto& ticket : dns_tickets_) {
+    if (ticket.occupied) continue;
+    ticket.owner = this;
+    ticket.generation = generation_;
+    ticket.occupied = true;
+    const err_t result = dns_gethostbyname_addrtype(url.host.c_str(), &address_, dns_found,
+                                                   &ticket, LWIP_DNS_ADDRTYPE_IPV4);
+    if (result == ERR_INPROGRESS) return true;
+    ticket.occupied = false;
+    ticket.owner = nullptr;
+    address_ready_ = result == ERR_OK;
+    if (!address_ready_) state_ = core::LinkState::Failed;
+    return address_ready_;
   }
-  client_.setNoDelay(true);
-  open_ = true;
-  return true;
+  state_ = core::LinkState::Failed;
+  return false;
 }
 
-bool EspTransport::write(const char* data, size_t length) {
-  if (!open_) {
-    return false;
+void EspTransport::dns_found(const char*, const ip_addr_t* address, void* argument) {
+  auto& ticket = *static_cast<DnsTicket*>(argument);
+  EspTransport* owner = ticket.owner;
+  if (owner != nullptr && owner->generation_ == ticket.generation &&
+      owner->state_ == core::LinkState::Pending) {
+    if (address != nullptr) {
+      owner->address_ = *address;
+      owner->address_ready_ = true;
+    } else {
+      owner->state_ = core::LinkState::Failed;
+    }
   }
-  return client_.write(reinterpret_cast<const uint8_t*>(data), length) == length;
+  ticket.occupied = false;
+  ticket.owner = nullptr;
 }
 
-int EspTransport::read() {
-  if (position_ < buffered_) {
-    return buffer_[position_++];
+core::LinkState EspTransport::advance(uint32_t now_ms) {
+  (void)now_ms;
+  if (state_ != core::LinkState::Pending || !address_ready_ || pcb_ != nullptr) return state_;
+  pcb_ = tcp_new();
+  if (pcb_ == nullptr) {
+    state_ = core::LinkState::Failed;
+    return state_;
   }
-  if (!open_) {
+  tcp_arg(pcb_, this);
+  tcp_recv(pcb_, received);
+  tcp_err(pcb_, failed);
+  const err_t result = tcp_connect(pcb_, &address_, port_, connected);
+  if (result != ERR_OK) {
+    detach_and_close(true);
+    state_ = core::LinkState::Failed;
+  }
+  return state_;
+}
+
+err_t EspTransport::connected(void* argument, tcp_pcb* pcb, err_t error) {
+  auto& self = *static_cast<EspTransport*>(argument);
+  if (self.pcb_ == pcb && error == ERR_OK) self.state_ = core::LinkState::Ready;
+  return ERR_OK;
+}
+
+err_t EspTransport::received(void* argument, tcp_pcb* pcb, pbuf* data, err_t error) {
+  auto& self = *static_cast<EspTransport*>(argument);
+  if (self.pcb_ != pcb || error != ERR_OK) return ERR_MEM;
+  if (data == nullptr) {
+    self.eof_ = true;
+    return ERR_OK;
+  }
+  if (data->tot_len == 0) {
+    pbuf_free(data);
+    return ERR_OK;
+  }
+  if (self.received_ != nullptr) return ERR_MEM;
+  self.received_ = data;
+  self.offset_ = 0;
+  return ERR_OK;
+}
+
+void EspTransport::failed(void* argument, err_t error) {
+  (void)error;
+  auto& self = *static_cast<EspTransport*>(argument);
+  // lwIP has freed the PCB before invoking tcp_err.
+  self.pcb_ = nullptr;
+  self.read_end_ = core::ReadEnd::Error;
+  self.state_ = core::LinkState::Failed;
+}
+
+core::IoResult EspTransport::write_some(const uint8_t* data, size_t length) {
+  if (state_ == core::LinkState::Failed) return {core::IoState::Failed, 0};
+  if (state_ != core::LinkState::Ready || length == 0) return {core::IoState::Pending, 0};
+  const size_t room = tcp_sndbuf(pcb_);
+  const size_t available = length < room ? length : room;
+  const size_t count = available < 256 ? available : 256;
+  if (count == 0) return {core::IoState::Pending, 0};
+  const err_t result = tcp_write(pcb_, data, static_cast<uint16_t>(count), TCP_WRITE_FLAG_COPY);
+  if (result == ERR_MEM) return {core::IoState::Pending, 0};
+  if (result != ERR_OK) {
+    read_end_ = core::ReadEnd::Error;
+    state_ = core::LinkState::Failed;
+    return {core::IoState::Failed, 0};
+  }
+  tcp_output(pcb_);
+  return {core::IoState::Progress, count};
+}
+
+core::IoResult EspTransport::read_some(uint8_t* data, size_t capacity) {
+  if (capacity == 0) return {core::IoState::Pending, 0};
+  if (received_ != nullptr && capacity > 0) {
+    const size_t left = received_->tot_len - offset_;
+    const size_t available = capacity < left ? capacity : left;
+    const size_t count = available < 256 ? available : 256;
+    const size_t copied = pbuf_copy_partial(received_, data, static_cast<uint16_t>(count),
+                                            static_cast<uint16_t>(offset_));
+    offset_ += copied;
+    if (pcb_ != nullptr) tcp_recved(pcb_, static_cast<uint16_t>(copied));
+    if (offset_ == received_->tot_len) {
+      pbuf_free(received_);
+      received_ = nullptr;
+      offset_ = 0;
+    }
+    return {core::IoState::Progress, copied};
+  }
+  if (state_ == core::LinkState::Failed) return {core::IoState::Failed, 0};
+  if (eof_) {
     read_end_ = core::ReadEnd::Closed;
-    return -1;
+    return {core::IoState::End, 0};
   }
-  const uint32_t start = ::millis();
-  for (;;) {
-    // Sample closure before reading so bytes delivered with FIN are drained before EOF.
-    const bool connected = client_.connected();
-    const int got = client_.read(buffer_, sizeof(buffer_));
-    if (got > 0) {
-      buffered_ = static_cast<size_t>(got);
-      position_ = 1;
-      return buffer_[0];
-    }
-    if (!connected) {
-      read_end_ = core::ReadEnd::Closed;
-      return -1;
-    }
-    if (::millis() - start >= kIdleTimeoutMs) {
-      read_end_ = core::ReadEnd::Timeout;
-      return -1;
-    }
-    delay(1);  // lets Wi-Fi run and feeds the watchdog
-  }
+  return {core::IoState::Pending, 0};
+}
+
+void EspTransport::detach_and_close(bool abort_connection) {
+  if (pcb_ == nullptr) return;
+  tcp_pcb* pcb = pcb_;
+  pcb_ = nullptr;
+  tcp_arg(pcb, nullptr);
+  tcp_recv(pcb, nullptr);
+  tcp_sent(pcb, nullptr);
+  tcp_err(pcb, nullptr);
+  tcp_poll(pcb, nullptr, 0);
+  if (abort_connection || tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
 }
 
 void EspTransport::close() {
-  if (open_) {
-    client_.stop();
-    open_ = false;
-  }
-  buffered_ = 0;
-  position_ = 0;
+  ++generation_;
+  detach_and_close(state_ != core::LinkState::Ready || received_ != nullptr);
+  if (received_ != nullptr) pbuf_free(received_);
+  received_ = nullptr;
+  offset_ = 0;
+  address_ready_ = false;
+  eof_ = false;
+  state_ = core::LinkState::Failed;
 }
 
 uint32_t EspRandom::next() { return RANDOM_REG32; }
-
-namespace gateway_store {
-
-void begin() {
-  EEPROM.begin(kStoreBytes);
-  uint32_t magic = 0;
-  EEPROM.get(0, magic);
-  if (magic != kStoreMagic) {
-    stored_address[0] = '\0';
-    return;
-  }
-  for (size_t i = 0; i <= kMaxAddress; ++i) {
-    stored_address[i] = static_cast<char>(EEPROM.read(static_cast<int>(4 + i)));
-  }
-  stored_address[kMaxAddress] = '\0';
-}
-
-const char* load() { return stored_address; }
-
-bool save(const char* address) {
-  const size_t length = strnlen(address, kMaxAddress + 1);
-  if (length > kMaxAddress) {
-    return false;
-  }
-  EEPROM.put(0, kStoreMagic);
-  for (size_t i = 0; i <= kMaxAddress; ++i) {
-    const char c = i < length ? address[i] : '\0';
-    EEPROM.write(static_cast<int>(4 + i), static_cast<uint8_t>(c));
-    stored_address[i] = c;
-  }
-  return EEPROM.commit();
-}
-
-}  // namespace gateway_store

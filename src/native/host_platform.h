@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <string>
 
+#include <netdb.h>
+#include <sys/socket.h>
+
 #include "app.h"
 
 // Time under the scenario's control: steps set it explicitly.
@@ -22,26 +25,36 @@ class FakeTime final : public core::TimeSource {
   uint32_t millis_ = 0;
 };
 
-// Plain TCP sockets with a receive timeout. https:// is refused: the PC build only
-// talks to the mock server.
-class SocketTransport final : public core::Transport, private core::ByteSource {
+// Plain nonblocking TCP; HTTPS is refused because native runs use local mocks.
+class SocketTransport final : public core::Transport {
  public:
   ~SocketTransport();
+  SocketTransport() = default;
+  SocketTransport(const SocketTransport&) = delete;
+  SocketTransport& operator=(const SocketTransport&) = delete;
 
-  bool connect(const core::Url& url) override;
-  bool write(const char* data, size_t length) override;
-  core::ByteSource& input() override { return *this; }
+  bool begin(const core::Url& url, uint32_t now) override;
+  core::LinkState advance(uint32_t now) override;
+  core::IoResult write_some(const uint8_t* data, size_t length) override;
+  core::IoResult read_some(uint8_t* data, size_t capacity) override;
   void close() override;
   core::ReadEnd read_end() const override { return read_end_; }
 
  private:
-  int read() override;
-  core::ReadEnd read_end_ = core::ReadEnd::None;
+  enum class State : uint8_t { Idle, Resolve, Connect, Ready, Failed };
+  core::LinkState next_address();
 
+  core::ReadEnd read_end_ = core::ReadEnd::None;
+  State state_ = State::Idle;
   int fd_ = -1;
-  char buffer_[4096];
-  long buffered_ = 0;
-  long position_ = 0;
+  etl::string<64> host_;
+  uint16_t port_ = 0;
+  uint64_t resolver_token_ = 0;
+  bool addresses_ready_ = false;
+  addrinfo* addresses_ = nullptr;
+  addrinfo* next_ = nullptr;
+  sockaddr_storage numeric_{};
+  socklen_t numeric_length_ = 0;
 };
 
 // Nonces from the operating system's random source.
@@ -50,5 +63,5 @@ class HostRandom final : public core::Random {
   uint32_t next() override;
 };
 
-// GET `url` (plus "?query" when given) and return the HTTP status, or -1 on transport failure.
+// A bounded blocking convenience for scenario setup, outside the App loop.
 int http_get_status(const std::string& url, const char* query = nullptr);

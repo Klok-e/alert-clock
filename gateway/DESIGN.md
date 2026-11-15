@@ -177,9 +177,13 @@ pytest fails while that file is out of date with the encoder.
   per-strip RLE decoder.
 - **Freshness.** With no valid reply for 60 s, the clock treats both sources as stale: NoData
   banner, map data shown as old. Otherwise the Pi's stale flags decide.
-- **Retries.** A failed connection can block the clock's loop for seconds, so after a failed
-  poll the next comes 10 s later instead of 2 s, and a failed basemap download is retried after
-  30 s; a long press or `POST /debug/refresh` polls at once.
+- **Fetching.** DNS, connection, writes and reads advance without waiting for the network.
+  A transaction has a 2 s DNS/connection deadline, a 5 s no-progress timeout and a 10 s total
+  deadline. Each tick consumes at most 256 response bytes. Snapshot and basemap buffers stay
+  fixed-capacity; the request buffer becomes header-line storage after transmission.
+- **Retries.** A failed poll is retried after 10 s instead of 2 s, and a failed basemap download
+  after 30 s. A long press or `POST /debug/refresh` forces a snapshot; while a transaction is
+  active, refresh requests coalesce. Changing the gateway cancels the old transaction.
 - **Gateway address.** Entered on the `/wifi` page as `host` or `host:port` (default port 8080)
   and saved in flash.
 - **Inputs.** A long press and `POST /debug/refresh` poll the gateway at once.
@@ -194,6 +198,27 @@ pytest fails while that file is out of date with the encoder.
   content length is known. `last_failure` preserves the latest failed transfer across a
   successful retry. A failed map download leaves the map invalid until the next successful
   retry; the retry interval remains 30 seconds.
+- **Output profiles.** The clock owns its day/night brightness, three sound toggles per
+  profile and an editable daily Kyiv-time schedule. Defaults are day screen 80%, LED 100%,
+  all sounds; night 23:00–10:00, screen/LED 5%, automatic sounds off. Until time sync it uses
+  night settings. Automatic sounds disabled by a profile change stop rather than resume later.
+- **LED and sound playback.** One portable controller advances patterns from elapsed time
+  while fetching continues. Alert start/escalation gives three gentle LED pulses; clear fades
+  to off; NoData double-flashes amber every 5 s. The existing raised/escalation sound patterns
+  remain, and clear is one 80 ms, 1,400 Hz chirp. Hardware writes are cached by value.
+- **Settings and previews.** Authenticated `GET /settings` serves the page,
+  `GET /settings/state` reads settings/status, `POST /settings` saves, and
+  `POST /settings/preview` auditions submitted draft values without saving. A preview is
+  capped at 3 s and must finish before a pending real sound plays. The latest real event
+  replaces the pending event; muted or obsolete events are discarded, with profile and alert
+  relevance checked again on completion. Manual sound previews bypass scheduled muting.
+  Save commits before applying settings; an active preview keeps its captured values.
+  Safe mode rejects previews.
+- **Storage.** The emulated EEPROM allocation is 86 bytes: gateway `GWY1` bytes 0–67 are
+  preserved, and an explicitly encoded 18-byte versioned/CRC-checked record stores output
+  profiles and schedule. Missing or invalid output records use defaults without writing.
+  Failed commits leave live settings unchanged and restore staged bytes so a later unrelated
+  save cannot commit a rejected change.
 - **Threat symbols.** The map and nearest-track card distinguish UAVs (delta wing), FPV
   drones (four rotors), reconnaissance (eye), missiles (rocket), ballistic threats (bolt),
   guided bombs (bomb), aircraft (plane), and unknown types (question mark). The glyph stays

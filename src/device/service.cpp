@@ -2,7 +2,7 @@
 
 #include <ESP8266WiFi.h>
 
-#include "esp_platform.h"
+#include "device_store.h"
 #include "flash.h"
 
 namespace {
@@ -38,6 +38,9 @@ bool append_transfer(char* out, size_t capacity, size_t& used, const core::Trans
 
 const char* json_bool(bool value) { return value ? "true" : "false"; }
 
+const char kRoutes[] PROGMEM =
+    "alert-clock: /settings /wifi /debug/state /debug/press /debug/refresh /debug/sources /update\n";
+
 const char kWifiForm[] PROGMEM =
     "<!doctype html><meta name=viewport content='width=device-width'>"
     "<title>alert-clock Wi-Fi</title><h3>alert-clock Wi-Fi</h3>"
@@ -46,14 +49,178 @@ const char kWifiForm[] PROGMEM =
     "<p>Gateway (host or host:port)<br><input name=gateway maxlength=63>"
     "<p><button>Save and restart</button></form>";
 
+
+const char kSettingsPage[] PROGMEM = R"HTML(<!doctype html><html lang="uk"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Налаштування годинника</title>
+<style>html{color-scheme:dark light;font:16px system-ui}body{max-width:40rem;margin:2rem auto;padding:0 1rem}fieldset{margin:1rem 0;padding:1rem}label{display:block;margin:.7rem 0}input[type=number]{width:5rem}button,select{font:inherit;margin:.3rem;padding:.4rem}output{display:block;min-height:2rem}small{display:block}a{color:inherit}</style>
+<h1>Світло та звук</h1><p id="profile"></p><form id="settings">
+<fieldset><legend>Нічний розклад</legend><label>Початок <input type="time" name="night_start" required></label><label>Кінець <input type="time" name="night_end" required></label><small>Місцевий час Києва. До синхронізації часу діє нічний режим.</small></fieldset>
+<div id="profiles"></div><button type="submit" id="save">Зберегти</button></form>
+<p>Перевірка використовує незбережені значення. Перевірка звуку чутна навіть у нічному режимі та з вимкненим сповіщенням.</p><output id="message" role="status"></output>
+<p><a href="/wifi">Wi-Fi</a></p>
+<script>
+const form = document.querySelector('#settings');
+const message = document.querySelector('#message');
+const sounds = [['raised', 'Початок тривоги', 1], ['escalated', 'Посилення тривоги', 2], ['cleared', 'Відбій', 4]];
+const targets = [
+  ['screen', 'Яскравість екрана'], ['led_partial', 'LED: тривога в області'],
+  ['led_yellow', 'LED: загроза'], ['led_red', 'LED: тривога'],
+  ['led_nodata', 'LED: немає даних'], ['led_clear', 'LED: відбій'],
+  ...sounds.map(([key, title]) => [key, 'Звук: ' + title])
+];
+for (const [key, title] of [['day', 'День'], ['night', 'Ніч']]) {
+  const fieldset = document.createElement('fieldset');
+  fieldset.innerHTML = `<legend>${title}</legend>
+    <label>Екран, % <input type="number" name="${key}_screen" min="0" max="100" required></label>
+    <label>Інтенсивність LED, % <input type="number" name="${key}_led" min="0" max="100" required></label>`
+    + sounds.map(([sound, label]) => `<label><input type="checkbox" id="${key}_${sound}"> ${label}</label>`).join('')
+    + `<label>Перевірити <select id="${key}_target">`
+    + targets.map(([target, label]) => `<option value="${target}">${label}</option>`).join('')
+    + `</select></label><button type="button" data-preview="${key}" disabled>Перевірити</button>`;
+  document.querySelector('#profiles').append(fieldset);
+}
+let pending = false, polling = false, loaded = false;
+function soundMask(profile) {
+  return sounds.reduce((mask, [key, , bit]) =>
+    mask | (document.getElementById(profile + '_' + key).checked ? bit : 0), 0);
+}
+function previewButtons(busy) {
+  document.querySelectorAll('[data-preview]').forEach(button => {
+    button.disabled = !loaded || pending || busy;
+  });
+}
+async function state(fill = false) {
+  const response = await fetch('/settings/state');
+  if (!response.ok) throw Error('Не вдалося прочитати налаштування');
+  const settings = await response.json();
+  if (fill) {
+    for (const profile of ['day', 'night']) {
+      for (const field of ['screen', 'led']) {
+        form.elements[profile + '_' + field].value = settings[profile + '_' + field];
+      }
+      for (const [key, , bit] of sounds) {
+        document.getElementById(profile + '_' + key).checked = !!(settings[profile + '_sounds'] & bit);
+      }
+    }
+    for (const key of ['night_start', 'night_end']) form.elements[key].value = settings[key];
+    loaded = true;
+  }
+  document.querySelector('#profile').textContent = settings.safe_mode
+    ? 'Режим відновлення: перевірки недоступні.'
+    : 'Зараз діє ' + (settings.active_profile === 'night' ? 'нічний' : 'денний') + ' режим.';
+  previewButtons(settings.preview_busy || settings.safe_mode);
+  if (settings.preview_busy && !polling) {
+    polling = true;
+    setTimeout(async () => {
+      polling = false;
+      try { await state(); }
+      catch (error) { message.textContent = error.message; previewButtons(false); }
+    }, 1000);
+  }
+}
+async function post(url, data) {
+  const response = await fetch(url, {method: 'POST', body: new URLSearchParams(data)});
+  if (!response.ok) {
+    throw Error(response.status === 409 ? 'Зачекайте завершення поточного сигналу або перевірки.'
+      : response.status === 400 ? 'Перевірте значення та нічний розклад.'
+      : 'Не вдалося зберегти або застосувати налаштування.');
+  }
+}
+async function finishAction() {
+  pending = false;
+  try { await state(); }
+  catch (error) { message.textContent = error.message; previewButtons(false); }
+}
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!loaded || !form.reportValidity() || pending) return;
+  pending = true;
+  form.querySelector('#save').disabled = true;
+  previewButtons(true);
+  try {
+    const data = {};
+    for (const profile of ['day', 'night']) {
+      for (const field of ['screen', 'led']) data[profile + '_' + field] = form.elements[profile + '_' + field].value;
+      data[profile + '_sounds'] = soundMask(profile);
+    }
+    for (const key of ['night_start', 'night_end']) data[key] = form.elements[key].value;
+    await post('/settings', data);
+    message.textContent = 'Збережено.';
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    form.querySelector('#save').disabled = false;
+    await finishAction();
+  }
+});
+for (const button of document.querySelectorAll('[data-preview]')) {
+  button.addEventListener('click', async () => {
+    if (!loaded || !form.reportValidity() || pending) return;
+    pending = true;
+    previewButtons(true);
+    const profile = button.dataset.preview;
+    try {
+      await post('/settings/preview', {
+        profile, target: document.getElementById(profile + '_target').value,
+        screen: form.elements[profile + '_screen'].value,
+        led: form.elements[profile + '_led'].value, sounds: soundMask(profile)
+      });
+      message.textContent = 'Перевірка триває.';
+    } catch (error) {
+      message.textContent = error.message;
+    } finally {
+      await finishAction();
+    }
+  });
+}
+form.querySelector('#save').disabled = true;
+state(true).then(() => form.querySelector('#save').disabled = false)
+  .catch(error => message.textContent = error.message);
+</script></html>)HTML";
+
+bool parse_percent(const String& text, uint8_t maximum, uint8_t& result) {
+  if (text.length() == 0 || text.length() > 3) return false;
+  unsigned value = 0;
+  for (unsigned i = 0; i < text.length(); ++i) {
+    if (text[i] < '0' || text[i] > '9') return false;
+    value = value * 10 + static_cast<unsigned>(text[i] - '0');
+  }
+  if (value > maximum) return false;
+  result = static_cast<uint8_t>(value);
+  return true;
+}
+
+bool parse_minute(const String& text, uint16_t& result) {
+  if (text.length() != 5 || text[2] != ':') return false;
+  for (unsigned i : {0U, 1U, 3U, 4U}) {
+    if (text[i] < '0' || text[i] > '9') return false;
+  }
+  const unsigned hour = static_cast<unsigned>((text[0] - '0') * 10 + text[1] - '0');
+  const unsigned minute = static_cast<unsigned>((text[3] - '0') * 10 + text[4] - '0');
+  if (hour >= 24 || minute >= 60) return false;
+  result = static_cast<uint16_t>(hour * 60 + minute);
+  return true;
+}
+
+bool parse_target(const String& text, core::PreviewTarget& target) {
+  static const char* const names[] = {"screen", "led_partial", "led_yellow", "led_red", "led_nodata",
+                                     "led_clear", "raised", "escalated", "cleared"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+    if (text == names[i]) {
+      target = static_cast<core::PreviewTarget>(i);
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 void Service::begin(const char* admin_password) {
   password_ = admin_password;
 
   server_.on("/", HTTP_GET, [this]() {
-    server_.send(200, "text/plain",
-                 "alert-clock: /wifi /debug/state /debug/press /debug/refresh /debug/sources /update\n");
+    server_.send_P(200, "text/plain", kRoutes);
   });
   server_.on("/wifi", HTTP_GET, [this]() {
     if (authorized()) {
@@ -64,6 +231,18 @@ void Service::begin(const char* admin_password) {
     if (authorized()) {
       save_wifi();
     }
+  });
+  server_.on("/settings", HTTP_GET, [this]() {
+    if (authorized()) server_.send_P(200, "text/html; charset=utf-8", kSettingsPage);
+  });
+  server_.on("/settings/state", HTTP_GET, [this]() {
+    if (authorized()) send_settings();
+  });
+  server_.on("/settings", HTTP_POST, [this]() {
+    if (authorized()) save_settings();
+  });
+  server_.on("/settings/preview", HTTP_POST, [this]() {
+    if (authorized()) preview_settings();
   });
   server_.on("/debug/state", HTTP_GET, [this]() {
     if (authorized()) {
@@ -115,9 +294,16 @@ void Service::save_wifi() {
     return;
   }
   // An empty gateway field keeps the saved address.
-  if (gateway.length() > 0 && (!app_.set_gateway(gateway.c_str()) || !gateway_store::save(gateway.c_str()))) {
-    server_.send(400, "text/plain", "invalid gateway address\n");
-    return;
+  if (gateway.length() > 0) {
+    if (!core::valid_gateway_address(gateway.c_str())) {
+      server_.send(400, "text/plain", "invalid gateway address\n");
+      return;
+    }
+    if (!gateway_store::save(gateway.c_str())) {
+      server_.send(500, "text/plain", "gateway not saved\n");
+      return;
+    }
+    app_.set_gateway(gateway.c_str());
   }
   WiFi.persistent(true);  // the SDK keeps the credentials in flash
   WiFi.begin(ssid.c_str(), password.c_str());
@@ -197,11 +383,98 @@ void Service::send_state() {
                           static_cast<unsigned long>(basemap_status.successes),
                           static_cast<unsigned long>(basemap_status.failures));
   ok = ok && append_transfer(text, sizeof(text), used, basemap_status.last_failure);
-  static const char kEndFormat[] PROGMEM = "}}}\n";
-  ok = ok && append_flash(text, sizeof(text), used, kEndFormat);
+  static const char kOutputsFormat[] PROGMEM =
+      "}},\"outputs\":{\"night\":%s,\"screen_percent\":%u,\"frequency_hz\":%u,"
+      "\"led_rgb\":%lu,\"preview_busy\":%s}}\n";
+  ok = ok && append_flash(text, sizeof(text), used, kOutputsFormat, json_bool(outputs_.night()),
+                          static_cast<unsigned>(outputs_.screen_percent()),
+                          static_cast<unsigned>(outputs_.frequency_hz()),
+                          static_cast<unsigned long>(outputs_.led_rgb()), json_bool(outputs_.preview_busy()));
   if (!ok) {
     server_.send(500, "text/plain", "state too large\n");
     return;
   }
   server_.send(200, "application/json", text);
+}
+
+bool Service::fields_match(const char* const* names, size_t count) {
+  if (static_cast<size_t>(server_.args()) != count) return false;
+  for (size_t i = 0; i < count; ++i) {
+    unsigned matches = 0;
+    for (int j = 0; j < server_.args(); ++j) {
+      if (server_.argName(j) == names[i]) ++matches;
+    }
+    if (matches != 1) return false;
+  }
+  return true;
+}
+
+void Service::send_settings() {
+  const core::OutputSettings& settings = outputs_.settings();
+  static const char kFormat[] PROGMEM =
+      "{\"day_screen\":%u,\"day_led\":%u,\"day_sounds\":%u,"
+      "\"night_screen\":%u,\"night_led\":%u,\"night_sounds\":%u,"
+      "\"night_start\":\"%02u:%02u\",\"night_end\":\"%02u:%02u\","
+      "\"active_profile\":\"%s\",\"preview_busy\":%s,\"safe_mode\":%s}\n";
+  char text[320];
+  const int length = ui::flash_format(
+      text, sizeof(text), kFormat, static_cast<unsigned>(settings.day.screen_percent),
+      static_cast<unsigned>(settings.day.led_percent), static_cast<unsigned>(settings.day.sound_mask),
+      static_cast<unsigned>(settings.night.screen_percent), static_cast<unsigned>(settings.night.led_percent),
+      static_cast<unsigned>(settings.night.sound_mask), static_cast<unsigned>(settings.night_start / 60),
+      static_cast<unsigned>(settings.night_start % 60), static_cast<unsigned>(settings.night_end / 60),
+      static_cast<unsigned>(settings.night_end % 60), outputs_.night() ? "night" : "day",
+      json_bool(outputs_.preview_busy()), json_bool(safe_mode_.active()));
+  if (length < 0 || static_cast<size_t>(length) >= sizeof(text)) {
+    server_.send(500, "text/plain", "state too large\n");
+    return;
+  }
+  server_.sendHeader("Cache-Control", "no-store");
+  server_.send(200, "application/json", text);
+}
+
+void Service::save_settings() {
+  const char* const names[] = {"day_screen", "day_led", "day_sounds", "night_screen", "night_led",
+                               "night_sounds", "night_start", "night_end"};
+  core::OutputSettings settings;
+  const bool valid = fields_match(names, sizeof(names) / sizeof(names[0])) &&
+      parse_percent(server_.arg("day_screen"), 100, settings.day.screen_percent) &&
+      parse_percent(server_.arg("day_led"), 100, settings.day.led_percent) &&
+      parse_percent(server_.arg("day_sounds"), 7, settings.day.sound_mask) &&
+      parse_percent(server_.arg("night_screen"), 100, settings.night.screen_percent) &&
+      parse_percent(server_.arg("night_led"), 100, settings.night.led_percent) &&
+      parse_percent(server_.arg("night_sounds"), 7, settings.night.sound_mask) &&
+      parse_minute(server_.arg("night_start"), settings.night_start) &&
+      parse_minute(server_.arg("night_end"), settings.night_end) && core::valid_output_settings(settings);
+  if (!valid) {
+    server_.send(400, "text/plain", "invalid output settings\n");
+    return;
+  }
+  if (!output_store::save(settings)) {
+    server_.send(500, "text/plain", "settings not saved\n");
+    return;
+  }
+  outputs_.configure(settings, millis());
+  server_.send(200, "text/plain", "saved\n");
+}
+
+void Service::preview_settings() {
+  const char* const names[] = {"profile", "target", "screen", "led", "sounds"};
+  core::OutputProfile profile;
+  core::PreviewTarget target = core::PreviewTarget::Screen;
+  const String& name = server_.arg("profile");
+  const bool valid = fields_match(names, sizeof(names) / sizeof(names[0])) &&
+      (name == "day" || name == "night") && parse_target(server_.arg("target"), target) &&
+      parse_percent(server_.arg("screen"), 100, profile.screen_percent) &&
+      parse_percent(server_.arg("led"), 100, profile.led_percent) &&
+      parse_percent(server_.arg("sounds"), 7, profile.sound_mask);
+  if (!valid) {
+    server_.send(400, "text/plain", "invalid preview\n");
+    return;
+  }
+  if (safe_mode_.active() || !outputs_.preview(profile, target, millis())) {
+    server_.send(409, "text/plain", "outputs busy or unavailable\n");
+    return;
+  }
+  server_.send(202, "text/plain", "preview started\n");
 }

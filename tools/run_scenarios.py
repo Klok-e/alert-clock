@@ -25,6 +25,7 @@ import tempfile
 import time
 
 import mock_server
+from gateway_proxy import GatewayProxy
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "fixtures" / "scenarios"
@@ -93,7 +94,7 @@ def run_one(scenario_path, out, mock_base, font, env):
     scenario = json.loads(scenario_path.read_text())
     key_hex = secrets.token_hex(32)
     port = free_port()
-    with tempfile.TemporaryDirectory(prefix="alert-gateway-") as work:
+    with tempfile.TemporaryDirectory(prefix="alert-gateway-", dir=ROOT / ".tmp") as work:
         work = pathlib.Path(work)
         config = work / "gateway.toml"
         write_config(config, scenario, key_hex, port, mock_base, work / "cache", font)
@@ -104,10 +105,14 @@ def run_one(scenario_path, out, mock_base, font, env):
                 if not wait_for_port(port, gateway):
                     print(f"gateway did not start; see {out / 'gateway.log'}")
                     return False
-                result = subprocess.run([str(PROGRAM), "--scenario", str(scenario_path),
-                                         "--gateway", f"127.0.0.1:{port}", "--key", key_hex,
-                                         "--mock", mock_base, "--out", str(out)], env=env)
-                return result.returncode == 0
+                proxy = GatewayProxy(port)
+                try:
+                    result = subprocess.run([str(PROGRAM), "--scenario", str(scenario_path),
+                                             "--gateway", f"127.0.0.1:{proxy.port}", "--key", key_hex,
+                                             "--mock", mock_base, "--out", str(out)], env=env, timeout=180)
+                    return result.returncode == 0
+                finally:
+                    proxy.stop()
             finally:
                 gateway.terminate()
                 try:
@@ -133,6 +138,7 @@ def main():
     if missing or not files:
         sys.exit(f"no such scenario: {', '.join(missing) or SCENARIOS}")
     font = label_font()
+    (ROOT / ".tmp").mkdir(exist_ok=True)
 
     mock = mock_server.Server()
     failed = []
