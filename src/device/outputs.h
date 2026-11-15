@@ -6,7 +6,7 @@
 #include "board.h"
 #include "screen.h"
 
-// Backlight, buzzer and the RGB LED under the tube. Nothing here blocks.
+// Backlight, buzzer and the RGB LED under the tube. Sound patterns advance without delays.
 class Outputs {
  public:
   void begin();

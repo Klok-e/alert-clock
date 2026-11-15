@@ -108,8 +108,7 @@ class Gateway:
             rings_km=self.rings,
         )
         parsed = [t for t in (tracks.parse_track(item) for item in self.neptun.threats.values()) if t]
-        # NEPTUN's "region" for the home oblast: the feature's "region", or "name" for Kyiv city.
-        names = ((self.home.oblast_region or self.home.oblast_name),) if self.home else ()
+        names = (self.home.track_region_name,) if self.home else ()
         picture = tracks.build(parsed, self.config.home, self.config.map_radius_km, self.config.watch_radius_km,
                                now, self.home.oblast_key if self.home else None, names)
         s.threats_in_watch = picture.threats_in_watch

@@ -69,26 +69,4 @@ class LimitedSource final : public ByteSource {
   size_t remaining_;
 };
 
-// Lets a parser give back the one byte it just looked at.
-class PushbackSource final : public ByteSource {
- public:
-  explicit PushbackSource(ByteSource& inner) : inner_(inner) {}
-
-  int read() override {
-    if (pending_ >= 0) {
-      const int c = pending_;
-      pending_ = -1;
-      return c;
-    }
-    return inner_.read();
-  }
-
-  // Holds at most one byte; a second unread() replaces the first.
-  void unread(int c) { pending_ = c; }
-
- private:
-  ByteSource& inner_;
-  int pending_ = -1;
-};
-
 }  // namespace core

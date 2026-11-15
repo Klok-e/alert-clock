@@ -1,0 +1,11 @@
+{
+  "description": "Malformed alert entries preserve the last valid alert until it goes stale, and valid data restores normal operation.",
+  "start": "2026-11-14T19:00:00Z",
+  "home": [50.85, 30.45],
+  "steps": [
+    {"at": 0, "phase": "oblast_yellow", "expect": {"panel": "clock", "banner": "yellow"}},
+    {"at": 20, "phase": "malformed_alerts", "expect": {"panel": "clock", "banner": "yellow", "sound": "none"}},
+    {"at": 200, "phase": "malformed_alerts", "expect": {"panel": "clock", "banner": "nodata"}},
+    {"at": 240, "phase": "quiet", "expect": {"panel": "clock", "banner": "none"}}
+  ]
+}

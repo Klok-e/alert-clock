@@ -99,8 +99,6 @@ struct GatewayStatus {
   uint32_t failures = 0;
   uint32_t rejections = 0;
   bool ever_valid = false;
-  bool silent = true;  // latched once silent_ms passes without a valid reply
-  uint32_t last_valid_ms = 0;
 };
 
 class App {
@@ -130,7 +128,7 @@ class App {
   enum class Request : uint8_t { Snapshot, Basemap };
 
   uint64_t advance_uptime();
-  bool recent(uint32_t now) const;
+  bool snapshot_recent() const;
   FetchOutcome fetch(Request request);
   FetchOutcome fetch_body(Request request, TransferStatus& transfer);
   void accept_snapshot();

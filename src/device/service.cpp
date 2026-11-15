@@ -3,32 +3,38 @@
 #include <ESP8266WiFi.h>
 
 #include "esp_platform.h"
+#include "flash.h"
 
 namespace {
 
 constexpr const char* kUser = "admin";
 constexpr uint32_t kRestartDelayMs = 1500;
-// Worst-case state JSON is under 1,200 bytes; format storage remains on the stack.
 constexpr size_t kStateBytes = 1280;
 
-// Every value below is a number, a boolean or one of the fixed enum names, so no
-// JSON escaping is needed.
-const char kStateFormat[] PROGMEM =
-    "{\"uptime_s\":%lu,\"safe_mode\":%s,\"crash_boots\":%lu,\"reset_reason\":%d,"
-    "\"heap\":{\"free\":%lu,\"max_block\":%lu,\"fragmentation\":%u},"
-    "\"wifi\":{\"connected\":%s,\"rssi\":%d},"
-    "\"view\":{\"panel\":\"%s\",\"banner\":\"%s\",\"time_valid\":%s,\"markers\":%u,"
-    "\"threats_in_watch\":%u,\"alert_level\":\"%s\",\"alert_duration_s\":%ld},"
-    "\"gateway\":{\"configured\":%s,\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
-    "\"successes\":%lu,\"failures\":%lu,\"rejections\":%lu,\"since_valid_s\":%ld,"
-    "\"alerts_stale\":%s,\"threats_stale\":%s},"
-    "\"basemap\":{\"valid\":%s,\"version\":%lu,\"wanted\":%lu,"
-    "\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
-    "\"read_end\":\"%s\",\"expected_bytes\":%ld,\"received_bytes\":%lu,"
-    "\"duration_ms\":%lu,\"successes\":%lu,\"failures\":%lu,"
-    "\"last_failure\":{\"outcome\":\"%s\",\"http\":%d,"
-    "\"rejection\":\"%s\",\"read_end\":\"%s\",\"expected_bytes\":%ld,"
-    "\"received_bytes\":%lu,\"duration_ms\":%lu}}}\n";
+template <typename... Args>
+bool append_flash(char* out, size_t capacity, size_t& used, const char* format_flash, Args... args) {
+  if (used >= capacity) {
+    return false;
+  }
+  const size_t remaining = capacity - used;
+  const int length = ui::flash_format(out + used, remaining, format_flash, args...);
+  if (length < 0 || static_cast<size_t>(length) >= remaining) {
+    return false;
+  }
+  used += static_cast<size_t>(length);
+  return true;
+}
+
+bool append_transfer(char* out, size_t capacity, size_t& used, const core::TransferStatus& transfer) {
+  static const char kTransferFormat[] PROGMEM =
+      "\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
+      "\"read_end\":\"%s\",\"expected_bytes\":%ld,\"received_bytes\":%lu,\"duration_ms\":%lu";
+  return append_flash(out, capacity, used, kTransferFormat, core::fetch_outcome_name(transfer.outcome),
+                      transfer.http_status, core::wire_result_name(transfer.rejection),
+                      core::read_end_name(transfer.read_end), static_cast<long>(transfer.expected_bytes),
+                      static_cast<unsigned long>(transfer.received_bytes),
+                      static_cast<unsigned long>(transfer.duration_ms));
+}
 
 const char* json_bool(bool value) { return value ? "true" : "false"; }
 
@@ -134,37 +140,66 @@ void Service::send_state() {
   const rst_info* reset = ESP.getResetInfoPtr();
   const core::GatewayStatus& gateway = app_.status();
   const core::BasemapStatus& basemap_status = app_.basemap_status();
-  const core::TransferStatus& basemap_last = basemap_status.last;
-  const core::TransferStatus& basemap_failure = basemap_status.last_failure;
   const core::Snapshot& snapshot = app_.snapshot();
   const uint32_t since = app_.since_valid_s();
   char text[kStateBytes];
-  const int length = snprintf_P(
-      text, sizeof(text), kStateFormat, static_cast<unsigned long>(millis() / 1000),
+  size_t used = 0;
+
+  // Values are numbers, booleans or fixed enum names; none need JSON escaping.
+  static const char kPrefixFormat[] PROGMEM =
+      "{\"uptime_s\":%lu,\"safe_mode\":%s,\"crash_boots\":%lu,\"reset_reason\":%d,";
+  bool ok = append_flash(
+      text, sizeof(text), used, kPrefixFormat, static_cast<unsigned long>(millis() / 1000),
       json_bool(safe_mode_.active()), static_cast<unsigned long>(safe_mode_.crash_boots()),
-      reset != nullptr ? static_cast<int>(reset->reason) : -1,
+      reset != nullptr ? static_cast<int>(reset->reason) : -1);
+
+  static const char kHeapFormat[] PROGMEM =
+      "\"heap\":{\"free\":%lu,\"max_block\":%lu,\"fragmentation\":%u},";
+  ok = ok && append_flash(
+      text, sizeof(text), used, kHeapFormat,
       static_cast<unsigned long>(ESP.getFreeHeap()), static_cast<unsigned long>(ESP.getMaxFreeBlockSize()),
-      static_cast<unsigned>(ESP.getHeapFragmentation()), json_bool(WiFi.status() == WL_CONNECTED),
-      static_cast<int>(WiFi.RSSI()), core::panel_name(view_.panel), core::banner_name(view_.banner),
+      static_cast<unsigned>(ESP.getHeapFragmentation()));
+
+  static const char kWifiFormat[] PROGMEM = "\"wifi\":{\"connected\":%s,\"rssi\":%d},";
+  ok = ok && append_flash(text, sizeof(text), used, kWifiFormat,
+                          json_bool(WiFi.status() == WL_CONNECTED), static_cast<int>(WiFi.RSSI()));
+
+  static const char kViewFormat[] PROGMEM =
+      "\"view\":{\"panel\":\"%s\",\"banner\":\"%s\",\"time_valid\":%s,\"markers\":%u,"
+      "\"threats_in_watch\":%u,\"alert_level\":\"%s\",\"alert_duration_s\":%ld},";
+  ok = ok && append_flash(
+      text, sizeof(text), used, kViewFormat, core::panel_name(view_.panel), core::banner_name(view_.banner),
       json_bool(view_.time_valid), static_cast<unsigned>(snapshot.markers.size()),
       static_cast<unsigned>(snapshot.threats_in_watch), core::alert_level_name(snapshot.alert_level),
-      view_.alert_duration_s == core::kNever ? -1L : static_cast<long>(view_.alert_duration_s),
+      view_.alert_duration_s == core::kNever ? -1L : static_cast<long>(view_.alert_duration_s));
+
+  static const char kGatewayFormat[] PROGMEM =
+      "\"gateway\":{\"configured\":%s,\"outcome\":\"%s\",\"http\":%d,\"rejection\":\"%s\","
+      "\"successes\":%lu,\"failures\":%lu,\"rejections\":%lu,\"since_valid_s\":%ld,"
+      "\"alerts_stale\":%s,\"threats_stale\":%s},";
+  ok = ok && append_flash(
+      text, sizeof(text), used, kGatewayFormat,
       json_bool(app_.gateway_configured()), core::fetch_outcome_name(gateway.last_outcome),
       gateway.last_http_status, core::wire_result_name(gateway.last_rejection),
       static_cast<unsigned long>(gateway.successes), static_cast<unsigned long>(gateway.failures),
       static_cast<unsigned long>(gateway.rejections), since == core::kNever ? -1L : static_cast<long>(since),
-      json_bool(snapshot.alerts_stale), json_bool(snapshot.threats_stale), json_bool(app_.basemap().valid()),
-      static_cast<unsigned long>(app_.basemap().version()), static_cast<unsigned long>(snapshot.basemap_version),
-      core::fetch_outcome_name(basemap_last.outcome), basemap_last.http_status,
-      core::wire_result_name(basemap_last.rejection), core::read_end_name(basemap_last.read_end),
-      static_cast<long>(basemap_last.expected_bytes), static_cast<unsigned long>(basemap_last.received_bytes),
-      static_cast<unsigned long>(basemap_last.duration_ms),
-      static_cast<unsigned long>(basemap_status.successes), static_cast<unsigned long>(basemap_status.failures),
-      core::fetch_outcome_name(basemap_failure.outcome), basemap_failure.http_status,
-      core::wire_result_name(basemap_failure.rejection), core::read_end_name(basemap_failure.read_end),
-      static_cast<long>(basemap_failure.expected_bytes), static_cast<unsigned long>(basemap_failure.received_bytes),
-      static_cast<unsigned long>(basemap_failure.duration_ms));
-  if (length <= 0 || static_cast<size_t>(length) >= sizeof(text)) {
+      json_bool(snapshot.alerts_stale), json_bool(snapshot.threats_stale));
+
+  static const char kBasemapFormat[] PROGMEM = "\"basemap\":{\"valid\":%s,\"version\":%lu,\"wanted\":%lu,";
+  ok = ok && append_flash(text, sizeof(text), used, kBasemapFormat, json_bool(app_.basemap().valid()),
+                          static_cast<unsigned long>(app_.basemap().version()),
+                          static_cast<unsigned long>(snapshot.basemap_version));
+  ok = ok && append_transfer(text, sizeof(text), used, basemap_status.last);
+
+  static const char kBasemapCountersFormat[] PROGMEM =
+      ",\"successes\":%lu,\"failures\":%lu,\"last_failure\":{";
+  ok = ok && append_flash(text, sizeof(text), used, kBasemapCountersFormat,
+                          static_cast<unsigned long>(basemap_status.successes),
+                          static_cast<unsigned long>(basemap_status.failures));
+  ok = ok && append_transfer(text, sizeof(text), used, basemap_status.last_failure);
+  static const char kEndFormat[] PROGMEM = "}}}\n";
+  ok = ok && append_flash(text, sizeof(text), used, kEndFormat);
+  if (!ok) {
     server_.send(500, "text/plain", "state too large\n");
     return;
   }

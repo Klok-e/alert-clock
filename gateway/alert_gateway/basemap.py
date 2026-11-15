@@ -138,20 +138,23 @@ def _multipolygon_mask(size: tuple[int, int], projection: geo.Projection, member
     return _area_mask(size, projected("outer"), projected("inner"))
 
 
-def _label_box(draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str, x: float,
-               y: float) -> tuple[float, float, float, float]:
-    """Where _label draws `text`, with a 2-pixel margin: left, top, right, bottom."""
+@dataclass(frozen=True)
+class LabelPlacement:
+    origin: tuple[float, float]
+    padded_bounds: tuple[float, float, float, float]
+
+
+def _label_placement(draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str, x: float,
+                     y: float) -> LabelPlacement:
     width = draw.textlength(text, font=font)
     left = max(2, min(geo.SCREEN - 2 - width, x - width / 2))
     _, top, _, bottom = font.getbbox(text, anchor="la")
-    return left - 2, y + top - 2, left + width + 2, y + bottom + 2
+    return LabelPlacement((left, y), (left - 2, y + top - 2, left + width + 2, y + bottom + 2))
 
 
-def _label(draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str, x: float, y: float,
+def _label(draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str, placement: LabelPlacement,
            index: int) -> None:
-    width = draw.textlength(text, font=font)
-    left = max(2, min(geo.SCREEN - 2 - width, x - width / 2))
-    draw.text((left, y), text, fill=index, font=font, anchor="la")
+    draw.text(placement.origin, text, fill=index, font=font, anchor="la")
 
 
 def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fills: dict[str, int],
@@ -162,6 +165,7 @@ def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fill
     image = Image.new("L", (geo.SCREEN, geo.SCREEN), GROUND)
     draw = ImageDraw.Draw(image)
     draw.fontmode = "1"  # no anti-aliasing: every pixel must stay a palette index
+    home_placement = _label_placement(draw, font, home_label, geo.HALF, geo.HALF + 8)
 
     # Required: fills (yellow below red, so the more severe level shows) and borders.
     for level in (LEVEL_YELLOW, LEVEL_RED):
@@ -170,7 +174,7 @@ def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fill
                 if filled.get(feature["properties"].get("key")) == level:
                     _draw_region_fill(image, projection, feature["geometry"], FILL_INDEX[level])
     _draw_borders(draw, projection, oblasts, raions)
-    _label(draw, font, home_label, geo.HALF, geo.HALF + 8, HOME_LABEL)
+    _label(draw, font, home_label, home_placement, HOME_LABEL)
     rows = _encode(image)
     if not _fits(rows):
         raise ConfigError("the region fills, borders and home label alone exceed 20 KB; reduce radius_km")
@@ -237,7 +241,7 @@ def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fill
         overlay = ImageDraw.Draw(candidate)
         overlay.fontmode = "1"
         _draw_borders(overlay, projection, oblasts, raions)
-        _label(overlay, font, home_label, geo.HALF, geo.HALF + 8, HOME_LABEL)
+        _label(overlay, font, home_label, home_placement, HOME_LABEL)
         first, last = max(0, first_row), min(geo.SCREEN - 1, last_row)
         candidate_rows = rows[:first] + _encode(candidate, first, last + 1) + rows[last + 1:]
         if not _fits(candidate_rows):
@@ -245,11 +249,11 @@ def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fill
         image, rows = candidate, candidate_rows
         return True
 
-    def text_layer(name: str, x: float, y: float):
+    def text_layer(name: str, placement: LabelPlacement):
         def draw_text(candidate: Image.Image) -> None:
             d = ImageDraw.Draw(candidate)
             d.fontmode = "1"
-            _label(d, font, name, x, y, LABEL)
+            _label(d, font, name, placement, LABEL)
         return draw_text
 
     for layer in (water, roads):
@@ -258,9 +262,10 @@ def render(oblasts: dict, raions: dict, oblast_fills: dict[str, int], raion_fill
     # changes only the rows of its box, so only those are encoded again.
     placed: list[tuple[float, float, float, float]] = []
     for name, x, y in place_labels():
-        box = _label_box(draw, font, name, x, y - 6)
+        placement = _label_placement(draw, font, name, x, y - 6)
+        box = placement.padded_bounds
         if any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in placed):
             continue
-        if keep_if_fits(text_layer(name, x, y - 6), int(box[1]), int(box[3]) + 1):
+        if keep_if_fits(text_layer(name, placement), int(box[1]), int(box[3]) + 1):
             placed.append(box)
     return Basemap(wire.basemap_version(PALETTE, rows), PALETTE, rows)

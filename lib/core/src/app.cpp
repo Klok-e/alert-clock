@@ -140,8 +140,8 @@ uint32_t App::since_valid_s() {
   return status_.ever_valid ? age_s(advance_uptime(), valid_uptime_ms_) : kNever;
 }
 
-bool App::recent(uint32_t now) const {
-  return status_.ever_valid && !status_.silent && now - status_.last_valid_ms < settings_.silent_ms;
+bool App::snapshot_recent() const {
+  return status_.ever_valid && uptime_ms_ - valid_uptime_ms_ < settings_.silent_ms;
 }
 
 void App::tick() {
@@ -149,10 +149,6 @@ void App::tick() {
   const uint32_t now = time_.millis();
   if (map_requested_ && now - map_requested_at_ >= settings_.map_request_ms) {
     map_requested_ = false;
-  }
-  // Latching keeps the uint32 age from wrapping back into "recent" after ~49.7 days of silence.
-  if (status_.ever_valid && !status_.silent && now - status_.last_valid_ms >= settings_.silent_ms) {
-    status_.silent = true;
   }
   if (!configured_) {
     status_.last_outcome = FetchOutcome::NotConfigured;
@@ -186,8 +182,6 @@ void App::tick() {
 
 void App::accept_snapshot() {
   status_.ever_valid = true;
-  status_.silent = false;
-  status_.last_valid_ms = time_.millis();
   valid_uptime_ms_ = advance_uptime();
   switch (tracker_.update(snapshot_.alert_level)) {
     case AlertChange::Raised:
@@ -298,11 +292,11 @@ FetchOutcome App::fetch_body(Request request, TransferStatus& transfer) {
 }
 
 void App::build_view(ViewModel& view) {
-  const uint32_t now_ms = time_.millis();
+  advance_uptime();
   const int64_t now = time_.unix_time();
   view = ViewModel{};
 
-  const bool is_recent = recent(now_ms);
+  const bool is_recent = snapshot_recent();
   Situation situation;
   situation.alert = is_recent ? snapshot_.alert_level : AlertLevel::Unknown;
   situation.alert_fresh = is_recent && !snapshot_.alerts_stale && snapshot_.alert_level != AlertLevel::Unknown;

@@ -71,10 +71,9 @@ const char kSetupDetail[] PROGMEM = "AlertClock-Setup 192.168.4.1/wifi";
 const char kConnected[] PROGMEM = "Wi-Fi підключено";
 const char kSafeMode[] PROGMEM = "Безпечний режим";
 
-// `title` is in flash, `detail` in RAM.
-void show_message(const char* title, const char* detail) {
+void show_message(const char* title_flash, const char* detail_ram) {
   char text[64];
-  ui::flash_copy(text, sizeof(text), title);
+  ui::flash_copy(text, sizeof(text), title_flash);
   display.startWrite();
   display.fillScreen(0);
   display.setTextDatum(lgfx::textdatum_t::middle_center);
@@ -82,7 +81,7 @@ void show_message(const char* title, const char* detail) {
   display.setFont(&ui::kInterTitle);
   display.drawString(text, core::kScreenPx / 2, 100);
   display.setFont(&ui::kInterBody);
-  display.drawString(detail, core::kScreenPx / 2, 135);
+  display.drawString(detail_ram, core::kScreenPx / 2, 135);
   display.endWrite();
 }
 
@@ -113,14 +112,14 @@ void connect_wifi() {
   show_message(kSetupTitle, detail);
 }
 
-// `title` is in flash. Shows the clock's address on screen and the serial log; uploads and /debug need it.
-void show_address(const char* title) {
+// Shows the clock's address on screen and the serial log; uploads and /debug need it.
+void show_address(const char* title_flash) {
   char text[24];
   const IPAddress ip = WiFi.localIP();
   snprintf(text, sizeof(text), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-  show_message(title, text);
+  show_message(title_flash, text);
   char title_text[48];
-  ui::flash_copy(title_text, sizeof(title_text), title);
+  ui::flash_copy(title_text, sizeof(title_text), title_flash);
   Serial.printf("%s: %s\n", title_text, text);
 }
 

@@ -121,17 +121,45 @@ void test_signed_snapshot_with_counts_that_disagree_with_its_length_is_malformed
   constexpr size_t kMarkerCount = 6 + 31 - 1;
   constexpr size_t kFirstTrailCount = 6 + 31 + 13;
   Snapshot s;
-  for (const auto& [offset, value] : {std::pair<size_t, uint8_t>{kMarkerCount, 1},
-                                      std::pair<size_t, uint8_t>{kMarkerCount, 3},
-                                      std::pair<size_t, uint8_t>{kMarkerCount, 200},
-                                      std::pair<size_t, uint8_t>{kFirstTrailCount, 6},
-                                      std::pair<size_t, uint8_t>{kFirstTrailCount, 7}}) {
+  TEST_ASSERT_EQUAL(static_cast<int>(WireResult::Ok),
+                    static_cast<int>(decode_snapshot(message.data(), message.size(), g_key, fixtures::kNonce, s)));
+  s.alert_level = AlertLevel::Red;
+  s.threats_in_watch = 777;
+  s.markers[0].point.x = 99;
+  s.markers[0].trail[0].x = 88;
+  struct Edit {
+    size_t offset;
+    uint8_t value;
+    const char* description;
+  };
+  const auto assert_rejected_without_change = [&](const std::vector<uint8_t>& edited, const char* description) {
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("malformed",
+        wire_result_name(decode_snapshot(edited.data(), edited.size(), g_key, fixtures::kNonce, s)), description);
+    TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(AlertLevel::Red), static_cast<int>(s.alert_level), description);
+    TEST_ASSERT_EQUAL_MESSAGE(777, s.threats_in_watch, description);
+    TEST_ASSERT_EQUAL_MESSAGE(2, s.markers.size(), description);
+    TEST_ASSERT_EQUAL_MESSAGE(99, s.markers[0].point.x, description);
+    TEST_ASSERT_EQUAL_MESSAGE(88, s.markers[0].trail[0].x, description);
+  };
+  for (const Edit& edit : {Edit{kMarkerCount, 1, "marker count leaves trailing data"},
+                           Edit{kMarkerCount, 3, "marker count exceeds available data"},
+                           Edit{kMarkerCount, 200, "marker count exceeds fixed capacity"},
+                           Edit{kFirstTrailCount, 6, "trail count exceeds available data"},
+                           Edit{kFirstTrailCount, 7, "trail count exceeds fixed capacity"}}) {
     std::vector<uint8_t> edited = message;
-    edited[offset] = value;
+    edited[edit.offset] = edit.value;
     resign(edited, g_key);
-    TEST_ASSERT_EQUAL_STRING("malformed",
-                             wire_result_name(decode_snapshot(edited.data(), edited.size(), g_key, fixtures::kNonce, s)));
+    assert_rejected_without_change(edited, edit.description);
   }
+  for (const size_t length : {size_t{6}, size_t{36}, message.size() - kSha256Bytes - 1}) {
+    std::vector<uint8_t> truncated(message.begin(), message.begin() + length);
+    truncated.resize(length + kSha256Bytes);
+    resign(truncated, g_key);
+    assert_rejected_without_change(truncated, "signed truncation leaves the last good snapshot intact");
+  }
+  message.insert(message.end() - kSha256Bytes, 0x00);
+  resign(message, g_key);
+  assert_rejected_without_change(message, "signed trailing byte leaves the last good snapshot intact");
 }
 
 void test_basemap_from_the_gateway_draws_its_runs() {
@@ -184,23 +212,24 @@ void test_signed_basemap_with_a_bad_row_is_refused_and_not_drawn() {
   struct Edit {
     size_t offset;
     uint8_t value;
+    const char* description;
   };
   // Row 0 is one 240-pixel run: count 1, then index 0 with length nibble 0, then length 240.
-  for (const Edit& edit : {Edit{kOffsets + 2 * 239 + 1, 0xFF},  // last row's offset past the rows
-                           Edit{kRows + 2, 239},                // first row covers 239 pixels
-                           Edit{kRows + 2, 0},                  // a zero-length long run
-                           Edit{kRows + 1, 0xF0},               // a 15-pixel short run instead
-                           Edit{kRows, 0x80}}) {                // runs read on into later rows
+  for (const Edit& edit : {Edit{kOffsets + 2 * 239 + 1, 0xFF, "last row offset exceeds rows area"},
+                           Edit{kRows + 2, 239, "row covers only 239 pixels"},
+                           Edit{kRows + 2, 0, "long run has zero length"},
+                           Edit{kRows + 1, 0xF0, "short run does not fill the row"},
+                           Edit{kRows, 0x80, "run count consumes following rows"}}) {
     std::vector<uint8_t> edited = message;
     edited[edit.offset] = edit.value;
     resign(edited, g_key);
     Basemap map;
-    TEST_ASSERT_EQUAL_STRING("malformed",
-                             wire_result_name(map.load(edited.data(), edited.size(), g_key, fixtures::kNonce)));
-    TEST_ASSERT_FALSE(map.valid());
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("malformed",
+        wire_result_name(map.load(edited.data(), edited.size(), g_key, fixtures::kNonce)), edit.description);
+    TEST_ASSERT_FALSE_MESSAGE(map.valid(), edit.description);
     int calls = 0;
     map.for_each_run(0, [&](int16_t, int16_t, uint16_t) { ++calls; });
-    TEST_ASSERT_EQUAL(0, calls);
+    TEST_ASSERT_EQUAL_MESSAGE(0, calls, edit.description);
   }
 }
 

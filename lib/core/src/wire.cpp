@@ -59,29 +59,51 @@ AlertLevel level_from(uint8_t value) {
   return value <= static_cast<uint8_t>(AlertLevel::Red) ? static_cast<AlertLevel>(value) : AlertLevel::Unknown;
 }
 
-// Checks the MAC, version, type and nonce; on Ok, `body_length` excludes the MAC.
-WireResult check(const uint8_t* body, size_t length, const GatewayKey& key, uint32_t nonce, uint8_t type,
-                 size_t& body_length) {
+WireResult authenticate_message(const uint8_t* body, size_t length, const GatewayKey& key, uint32_t nonce,
+                                uint8_t expected_type, size_t& payload_length_without_mac) {
   if (length < kHeaderBytes + kSha256Bytes) {
     return WireResult::Malformed;
   }
-  body_length = length - kSha256Bytes;
+  payload_length_without_mac = length - kSha256Bytes;
   uint8_t mac[kSha256Bytes];
-  hmac_sha256(key, body, body_length, mac);
-  if (!equal_digest(mac, body + body_length, kSha256Bytes)) {
+  hmac_sha256(key, body, payload_length_without_mac, mac);
+  if (!equal_digest(mac, body + payload_length_without_mac, kSha256Bytes)) {
     return WireResult::BadMac;
   }
-  Reader header(body, body_length);
+  Reader header(body, payload_length_without_mac);
   if (header.u8() != kVersion) {
     return WireResult::WrongVersion;
   }
-  if (header.u8() != type) {
+  if (header.u8() != expected_type) {
     return WireResult::WrongType;
   }
   if (header.u32() != nonce) {
     return WireResult::WrongNonce;
   }
   return WireResult::Ok;
+}
+
+bool validate_snapshot_layout(const uint8_t* body, size_t payload_length_without_mac, uint8_t& marker_count) {
+  Reader sizes(body, payload_length_without_mac);
+  sizes.skip(kHeaderBytes + kSnapshotFixedBytes - 1);
+  const uint8_t count = sizes.u8();
+  if (count > kMaxMarkers) {
+    return false;
+  }
+  for (uint8_t i = 0; i < count && !sizes.failed; ++i) {
+    sizes.skip(kMarkerBytes - 1);
+    const uint8_t trail = sizes.u8();
+    if (trail > kMaxTrail) {
+      return false;
+    }
+    sizes.skip(trail * kTrailPointBytes);
+  }
+  if (sizes.failed || sizes.position() != payload_length_without_mac) {
+    return false;
+  }
+
+  marker_count = count;
+  return true;
 }
 
 int hex_value(char c) {
@@ -163,31 +185,17 @@ const char* wire_result_name(WireResult result) {
 
 WireResult decode_snapshot(const uint8_t* body, size_t length, const GatewayKey& key, uint32_t nonce,
                            Snapshot& out) {
-  size_t body_length = 0;
-  const WireResult checked = check(body, length, key, nonce, kTypeSnapshot, body_length);
+  size_t payload_length_without_mac = 0;
+  const WireResult checked = authenticate_message(body, length, key, nonce, kTypeSnapshot, payload_length_without_mac);
   if (checked != WireResult::Ok) {
     return checked;
   }
-  // First pass: the counts must account for the body exactly.
-  Reader sizes(body, body_length);
-  sizes.skip(kHeaderBytes + kSnapshotFixedBytes - 1);
-  const uint8_t marker_count = sizes.u8();
-  if (marker_count > kMaxMarkers) {
-    return WireResult::Malformed;
-  }
-  for (uint8_t i = 0; i < marker_count && !sizes.failed; ++i) {
-    sizes.skip(kMarkerBytes - 1);
-    const uint8_t trail = sizes.u8();
-    if (trail > kMaxTrail) {
-      return WireResult::Malformed;
-    }
-    sizes.skip(trail * kTrailPointBytes);
-  }
-  if (sizes.failed || sizes.position() != body_length) {
+  uint8_t marker_count = 0;
+  if (!validate_snapshot_layout(body, payload_length_without_mac, marker_count)) {
     return WireResult::Malformed;
   }
 
-  Reader in(body, body_length);
+  Reader in(body, payload_length_without_mac);
   in.skip(kHeaderBytes);
   Snapshot& s = out;
   s.alert_level = level_from(in.u8());
@@ -216,7 +224,7 @@ WireResult decode_snapshot(const uint8_t* body, size_t length, const GatewayKey&
   const uint8_t nearest_flags = in.u8();
   s.nearest_advisory = (nearest_flags & 1) != 0;
   s.nearest_stale = (nearest_flags & 2) != 0;
-  in.u8();  // marker count, checked above
+  in.skip(1);
   s.markers.clear();
   for (uint8_t i = 0; i < marker_count; ++i) {
     Marker m;
@@ -266,14 +274,14 @@ size_t Basemap::read_run(size_t position, uint8_t& length, uint8_t& index) const
 
 WireResult Basemap::load(const uint8_t* body, size_t length, const GatewayKey& key, uint32_t nonce) {
   valid_ = false;
-  size_t body_length = 0;
-  const WireResult checked = check(body, length, key, nonce, kTypeBasemap, body_length);
+  size_t payload_length_without_mac = 0;
+  const WireResult checked = authenticate_message(body, length, key, nonce, kTypeBasemap, payload_length_without_mac);
   if (checked != WireResult::Ok) {
     return checked;
   }
-  Reader in(body, body_length);
+  Reader in(body, payload_length_without_mac);
   in.skip(kHeaderBytes);
-  if (body_length < kHeaderBytes + kBasemapFixedBytes) {
+  if (payload_length_without_mac < kHeaderBytes + kBasemapFixedBytes) {
     return WireResult::Malformed;
   }
   const uint32_t version = in.u32();
@@ -284,7 +292,7 @@ WireResult Basemap::load(const uint8_t* body, size_t length, const GatewayKey& k
   in.skip(2 * kScreenPx);
   const uint16_t rows_length = in.u16();
   rows_ = body + in.position();
-  if (in.failed || in.position() + rows_length != body_length) {
+  if (in.failed || in.position() + rows_length != payload_length_without_mac) {
     return WireResult::Malformed;
   }
   rows_length_ = rows_length;

@@ -218,16 +218,25 @@ struct Canvas {
   }
 };
 
-constexpr int32_t kPillPadding = 10 + 6 + 7 + 12;  // left edge, dot, gap, right edge
+constexpr int32_t kPillLeftPadding = 10;
+constexpr int32_t kPillDotRadius = 3;
+constexpr int32_t kPillDotTextGap = 7;
+constexpr int32_t kPillRightPadding = 12;
+constexpr int32_t kPillDotCenterX = kPillLeftPadding + kPillDotRadius;
+constexpr int32_t kPillTextX = kPillLeftPadding + 2 * kPillDotRadius + kPillDotTextGap;
+constexpr int32_t kPillPadding = kPillTextX + kPillRightPadding;
+
+enum class PillLabelStyle { Full, Compact };
+enum class HorizontalAnchor { Left, Center };
 
 // The banner label; with a duration (not kNever), the short label and the duration, as
 // "Тривога · 1 год 23 хв", or the duration alone, in the pill's colour, if that is wider than
 // `max_width`.
-void pill_label(Canvas& c, char* out, size_t size, Banner banner, bool short_label, uint32_t duration_s,
+void pill_label(Canvas& c, char* out, size_t size, Banner banner, PillLabelStyle label_style, uint32_t duration_s,
                 int32_t max_width) {
   const size_t index = static_cast<size_t>(banner) % 5;
   if (duration_s == core::kNever) {
-    flash_copy(out, size, short_label ? kBannerShort[index] : kBannerLong[index]);
+    flash_copy(out, size, label_style == PillLabelStyle::Compact ? kBannerShort[index] : kBannerLong[index]);
     return;
   }
   char label[kLabelBytes];
@@ -241,22 +250,20 @@ void pill_label(Canvas& c, char* out, size_t size, Banner banner, bool short_lab
   }
 }
 
-// A rounded pill with a dot and a label; returns its width. `x` is the left edge, or the
-// centre when `centered`.
-int16_t draw_pill(Canvas& c, int32_t x, int32_t top, Banner banner, bool short_label, bool centered,
-                  uint32_t duration_s, int32_t max_width) {
+void draw_pill(Canvas& c, int32_t x, int32_t top, Banner banner, PillLabelStyle label_style, HorizontalAnchor anchor,
+               uint32_t duration_s, int32_t max_width) {
+  if (!c.touches(top, kPillHeight)) {
+    return;
+  }
   const BannerStyle style = banner_style(banner);
   char label[kLabelBytes + 24];
-  pill_label(c, label, sizeof(label), banner, short_label, duration_s, max_width);
+  pill_label(c, label, sizeof(label), banner, label_style, duration_s, max_width);
   c.g.setFont(&kInterTitle);
   const int32_t width = c.g.textWidth(label) + kPillPadding;
-  const int32_t left = centered ? x - width / 2 : x;
-  if (c.touches(top, kPillHeight)) {
-    c.g.fillRoundRect(left, c.y(top), width, kPillHeight, kPillHeight / 2, to565(style.background));
-    c.g.fillCircle(left + 13, c.y(top + kPillHeight / 2), 3, style.text);
-    c.ram_text(label, left + 23, top + kPillHeight / 2, &kInterTitle, style.text, lgfx::textdatum_t::middle_left);
-  }
-  return static_cast<int16_t>(width);
+  const int32_t left = anchor == HorizontalAnchor::Center ? x - width / 2 : x;
+  c.g.fillRoundRect(left, c.y(top), width, kPillHeight, kPillHeight / 2, to565(style.background));
+  c.g.fillCircle(left + kPillDotCenterX, c.y(top + kPillHeight / 2), kPillDotRadius, style.text);
+  c.ram_text(label, left + kPillTextX, top + kPillHeight / 2, &kInterTitle, style.text, lgfx::textdatum_t::middle_left);
 }
 
 uint16_t draw_badge_disc(Canvas& c, int32_t x, int32_t y, Rgb fill, bool hollow,
@@ -438,7 +445,8 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
   c.ram_text(detail, kLeft + 46, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);
 }
 
-void draw_credit(Canvas& c, int32_t baseline) {
+void draw_credit(Canvas& c) {
+  constexpr int32_t baseline = kSize - 6;
   if (c.touches(baseline - 10, 13)) {
     c.text(kCredit, kCenter, baseline, &kInterSmall, kMuted, lgfx::textdatum_t::baseline_center);
   }
@@ -446,7 +454,8 @@ void draw_credit(Canvas& c, int32_t baseline) {
 
 void draw_clock_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   c.g.fillScreen(kBackground);
-  draw_pill(c, kCenter, 12, view.banner, false, true, view.alert_duration_s, kSize - 12);
+  draw_pill(c, kCenter, 12, view.banner, PillLabelStyle::Full, HorizontalAnchor::Center,
+            view.alert_duration_s, kSize - 12);
 
   const int32_t time_baseline = 110;
   if (c.touches(time_baseline - 56, 60)) {
@@ -469,7 +478,6 @@ void draw_clock_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   }
 
   draw_threat_card(c, view, s, 158);
-  draw_credit(c, 234);
 }
 
 // Coloured squares with a count per kind, most dangerous first, as many as fit.
@@ -629,6 +637,25 @@ void draw_nearest_focus(Canvas& c, const Marker& marker) {
   }
 }
 
+void draw_map_footer(Canvas& c, const ViewModel& view, const Snapshot& s) {
+  const int16_t footer_y = kSize - kFooterHeight;
+  if (!c.touches(footer_y, kFooterHeight)) {
+    return;
+  }
+  c.g.fillRect(0, c.y(footer_y), kSize, kFooterHeight, kBackground);
+  c.g.drawFastHLine(0, c.y(footer_y), kSize, kLine);
+  const int32_t first_baseline = footer_y + 13;
+  if (!view.threats_fresh) {
+    char age[16];
+    char text[40];
+    format_age(age, sizeof(age), view.threats_age_s);
+    flash_format(text, sizeof(text), kMapStale, age);
+    c.ram_text(text, 6, first_baseline, &kInterSmall, kOrange, lgfx::textdatum_t::baseline_left);
+  } else {
+    draw_legend(c, s, first_baseline, kSize - 6);
+  }
+}
+
 void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
   if (!draw_basemap(c, view.basemap)) {
     c.g.fillScreen(kBackground);
@@ -689,7 +716,8 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
     c.g.setFont(&kInterTitle);
     const int32_t width = c.g.textWidth(text) + 16;
     if (view.banner != Banner::None) {
-      draw_pill(c, 6, pill_top, view.banner, true, false, view.alert_duration_s, kSize - 6 - width - 6 - 4);
+      draw_pill(c, 6, pill_top, view.banner, PillLabelStyle::Compact, HorizontalAnchor::Left,
+                view.alert_duration_s, kSize - 6 - width - 6 - 4);
     }
     c.g.fillRoundRect(kSize - 6 - width, c.y(pill_top), width, kPillHeight, kPillHeight / 2, kBackground);
     c.ram_text(text, kSize - 6 - width / 2, pill_top + kPillHeight / 2, &kInterTitle, kWhite,
@@ -699,23 +727,7 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
     }
   }
 
-  // Footer, two lines: the legend or the data age, then the credit.
-  const int16_t footer_y = kSize - kFooterHeight;
-  if (c.touches(footer_y, kFooterHeight)) {
-    c.g.fillRect(0, c.y(footer_y), kSize, kFooterHeight, kBackground);
-    c.g.drawFastHLine(0, c.y(footer_y), kSize, kLine);
-    const int32_t first_baseline = footer_y + 13;
-    if (!view.threats_fresh) {
-      char age[16];
-      char text[40];
-      format_age(age, sizeof(age), view.threats_age_s);
-      flash_format(text, sizeof(text), kMapStale, age);
-      c.ram_text(text, 6, first_baseline, &kInterSmall, kOrange, lgfx::textdatum_t::baseline_left);
-    } else {
-      draw_legend(c, s, first_baseline, kSize - 6);
-    }
-    draw_credit(c, kSize - 4);
-  }
+  draw_map_footer(c, view, s);
 }
 
 void draw_notice(Canvas& c) {
@@ -726,7 +738,6 @@ void draw_notice(Canvas& c) {
       c.text(kNoticeLines[i], kCenter, baseline, &kInterTitle, kWhite, lgfx::textdatum_t::baseline_center);
     }
   }
-  draw_credit(c, 234);
 }
 
 }  // namespace
@@ -745,6 +756,7 @@ void draw_scene(lgfx::LovyanGFX& g, int16_t top, const ViewModel& view) {
   } else {
     draw_clock_panel(canvas, view, snapshot);
   }
+  draw_credit(canvas);
 }
 
 void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const ViewModel& view) {

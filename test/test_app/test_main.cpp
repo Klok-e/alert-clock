@@ -141,15 +141,45 @@ void test_a_silent_gateway_turns_the_banner_to_no_data_after_a_minute() {
   TEST_ASSERT_NOT_EQUAL(std::string::npos,
                         gateway.requests[0].find("GET /v1/snapshot?n=1a2b3c4d HTTP/1.0"));
 
-  gateway.snapshots.clear();  // the gateway goes away
-  for (int i = 0; i < 29; ++i) {
-    time.advance_s(2);
-    app.tick();
-  }
-  TEST_ASSERT_EQUAL_STRING("yellow", banner(app));  // 58 s
-  time.advance_s(3);
+  gateway.snapshots.clear();
+  time.now_ms += 59999;
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("yellow", banner(app), "valid until the last millisecond before timeout");
+  ++time.now_ms;
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("nodata", banner(app), "stale at the exact timeout without another tick");
+}
+
+void test_snapshot_freshness_survives_wrap_extended_silence_and_recovery() {
+  FakeTime time;
+  time.now_ms = UINT32_MAX - 30000;
+  ScriptedGateway gateway;
+  FixedRandom random;
+  App app(test_settings(), time, gateway, random);
+  TEST_ASSERT_TRUE(app.set_gateway("gateway.test"));
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("nodata", banner(app), "no reply must never imply fresh data");
+  TEST_ASSERT_EQUAL_UINT32(kNever, app.since_valid_s());
+
+  gateway.snapshots = {ok_reply(fixtures::kSnapshot, sizeof(fixtures::kSnapshot))};
   app.tick();
-  TEST_ASSERT_EQUAL_STRING("nodata", banner(app));  // 61 s
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("yellow", banner(app), "a first good reply restores freshness");
+  gateway.snapshots.clear();
+  time.now_ms += 59999;
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("yellow", banner(app), "timer wrap must not expire a reply early");
+  ++time.now_ms;
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("nodata", banner(app), "timer wrap must preserve the timeout boundary");
+
+  time.now_ms += 0x80000000u;
+  app.tick();
+  time.now_ms += 0x80000000u - 60000u;
+  app.tick();
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("nodata", banner(app), "a full timer period must not revive stale data");
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(UINT32_MAX / 1000u, app.since_valid_s(),
+                                 "source age keeps increasing across a full timer period");
+
+  gateway.snapshots = {ok_reply(fixtures::kSnapshot, sizeof(fixtures::kSnapshot))};
+  app.refresh_now();
+  app.tick();
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("yellow", banner(app), "a good reply after extended silence restores freshness");
+  TEST_ASSERT_EQUAL_UINT32(0, app.since_valid_s());
 }
 
 // The basemap is downloaded into the buffer it is drawn from. It is fetched once per
@@ -247,6 +277,7 @@ void test_a_dead_gateway_is_retried_every_ten_seconds_unless_asked() {
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_a_silent_gateway_turns_the_banner_to_no_data_after_a_minute);
+  RUN_TEST(test_snapshot_freshness_survives_wrap_extended_silence_and_recovery);
   RUN_TEST(test_a_basemap_is_fetched_once_per_version_and_a_failed_download_leaves_no_map);
   RUN_TEST(test_a_dead_gateway_is_retried_every_ten_seconds_unless_asked);
   return UNITY_END();

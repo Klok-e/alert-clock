@@ -72,6 +72,20 @@ class SourceState:
         return self.age(now) > STALE_AFTER_S
 
 
+def parse_alerts(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise ValueError("alerts must be an object")
+    parsed = {}
+    for name in ("raions", "oblasts"):
+        entries = body.get(name)
+        if not isinstance(entries, list):
+            raise ValueError(f"alerts must contain a {name} array")
+        if any(not isinstance(entry, dict) or not isinstance(entry.get("key"), str) for entry in entries):
+            raise ValueError(f"each {name} entry must be an object with a string key")
+        parsed[name] = list(entries)
+    return parsed
+
+
 class Neptun:
     def __init__(self, config: Config, clock: Clock, on_change: Callable[[], None]):
         self.config = config
@@ -95,8 +109,8 @@ class Neptun:
     def apply_threats(self, threats: list) -> None:
         self.threats = {str(t.get("id")): t for t in threats if isinstance(t, dict)}
 
-    def apply_alerts(self, alerts: dict) -> None:
-        self.alerts = {"raions": list(alerts.get("raions") or []), "oblasts": list(alerts.get("oblasts") or [])}
+    def apply_alerts(self, alerts: object) -> None:
+        self.alerts = parse_alerts(alerts)
 
     def handle_frame(self, text: str) -> None:
         try:
@@ -114,8 +128,12 @@ class Neptun:
         elif kind == "remove" and isinstance(data, dict):
             self.threats.pop(str(data.get("id")), None)
             self._good("threats")
-        elif kind == "alerts" and isinstance(data, dict):
-            self.apply_alerts(data)
+        elif kind == "alerts":
+            try:
+                self.apply_alerts(data)
+            except ValueError as error:
+                log.warning("ignoring malformed alerts stream frame: %s", error)
+                return
             self._good("alerts")
             self.on_change()
         elif kind == "heartbeat":
@@ -141,8 +159,6 @@ class Neptun:
                 self.apply_threats(body["threats"])
             else:
                 body = await self._get_json("/api/v1/alerts")
-                if not isinstance(body, dict) or not isinstance(body.get("oblasts"), list):
-                    raise ValueError("no oblasts array")
                 self.apply_alerts(body)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
             log.warning("REST %s failed: %s", source, error)

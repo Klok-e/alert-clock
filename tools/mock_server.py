@@ -165,6 +165,7 @@ PHASES = {
                  "alerts": {"raions": [], "oblasts": [FAR_ALERT, KYIV_CITY("red")]}},
     "malformed": {"threats_raw": b'{"threats":[{"id":"x","type":"uav","lat":50.5,',
                   "alerts": QUIET_ALERTS, "stream_raw": '{"type":"snapshot","data":{"threats":[{"id"'},
+    "malformed_alerts": {"threats": [], "alerts": {"raions": [None], "oblasts": []}},
     "outage": {"status": 503},
     # Home in the Vyshhorod raion (HOME_VYSHHOROD).
     "oblast_yellow": {"threats": [], "alerts": {"raions": [], "oblasts": [

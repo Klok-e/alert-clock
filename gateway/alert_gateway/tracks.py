@@ -9,9 +9,24 @@ from datetime import datetime
 from . import geo
 from .wire import KIND_UNKNOWN, KINDS, MAX_MARKERS, MAX_TRAIL, Marker
 
-# Indexed by wire.KINDS; NEPTUN SDK prediction limits.
-FLY_HORIZON_S = (720, 720, 600, 300, 90, 240, 360, 360)
-MAX_GHOST_KM = (18, 12, 10, 30, 20, 10, 24, 10)
+
+@dataclass(frozen=True)
+class PredictionLimits:
+    horizon_s: float
+    max_distance_km: float
+
+
+# NEPTUN SDK prediction limits.
+PREDICTION_LIMITS = {
+    "uav": PredictionLimits(720, 18),
+    "recon": PredictionLimits(720, 12),
+    "fpv": PredictionLimits(600, 10),
+    "missile": PredictionLimits(300, 30),
+    "ballistic": PredictionLimits(90, 20),
+    "kab": PredictionLimits(240, 10),
+    "aircraft": PredictionLimits(360, 24),
+    "unknown": PredictionLimits(360, 10),
+}
 TRAIL_WINDOW_S = 900
 OFFSCREEN_MARGIN_PX = 24
 MAX_UNCERTAINTY_PX = 200
@@ -95,8 +110,9 @@ def predicted(track: Track, now: float) -> tuple[float, float]:
     """NEPTUN prediction, bounded by the threat type's time and distance limits."""
     if track.heading < 0 or track.speed_kmh <= 0 or track.observed is None or now <= track.observed:
         return (track.lat, track.lon)
-    elapsed = min(now - track.observed, FLY_HORIZON_S[track.kind])
-    distance = min(MAX_GHOST_KM[track.kind], track.speed_kmh * elapsed / 3600)
+    limits = PREDICTION_LIMITS[KINDS[track.kind]]
+    elapsed = min(now - track.observed, limits.horizon_s)
+    distance = min(limits.max_distance_km, track.speed_kmh * elapsed / 3600)
     return geo.destination((track.lat, track.lon), track.heading, distance)
 
 

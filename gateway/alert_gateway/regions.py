@@ -19,6 +19,10 @@ class HomeRegion:
     oblast_name: str
     raion_key: str | None  # None for Kyiv city, which has no raions
 
+    @property
+    def track_region_name(self) -> str:
+        return self.oblast_region or self.oblast_name
+
 
 def _area(geometry: dict) -> float:
     total = 0.0
