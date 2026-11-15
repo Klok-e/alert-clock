@@ -3,6 +3,10 @@
 `README.md` covers setup, why RAM is tight, and the data-source terms that bind any
 change to fetching or to the map screen.
 
+`gateway/DESIGN.md` is the agreed design for a Raspberry Pi gateway that replaces the clock's
+direct fetching; it is not built yet. Read it before changing fetching, alert sources, the screen
+data, the basemap or the RAM rules below.
+
 ## Verification
 
 After every code or fixture change, run:

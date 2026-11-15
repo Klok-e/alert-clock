@@ -40,7 +40,7 @@ static_assert(sizeof(CLOCK_ADMIN_PASSWORD) - 1 >= 8,
 
 // Everything is allocated statically or once in setup(); the loop does not allocate.
 ClockDisplay display;
-uint8_t band_pixels[core::kScreenPx * ui::kBandHeight];  // RGB332
+uint16_t band_pixels[core::kScreenPx * ui::kBandHeight];  // RGB565
 lgfx::LGFX_Sprite band(&display);
 EspTime time_source;
 EspTransport transport;
@@ -120,7 +120,7 @@ void setup() {
   display.setRotation(kRotation);
   display.fillScreen(0);
   outputs.set_backlight(kBrightness);
-  band.setBuffer(band_pixels, core::kScreenPx, ui::kBandHeight, 8);
+  band.setBuffer(band_pixels, core::kScreenPx, ui::kBandHeight, 16);
 
   show_message("Connecting Wi-Fi", "");
   connect_wifi();

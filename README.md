@@ -22,7 +22,7 @@ come from the reconstruction of the supplier firmware in the sibling
 Short button press: show the map for 30 s (press again to go back). Long press:
 refresh both sources now.
 
-Track colours: orange drone (light orange FPV), cyan reconnaissance drone, red
+Track colours: amber drone (light amber FPV), cyan reconnaissance drone, red
 missile, magenta ballistic, yellow guided bomb, white aircraft, grey unknown, grey
 outline for observations that
 are not a shelter signal (NEPTUN "advisory"). Tracks NEPTUN can only place in a
@@ -62,7 +62,7 @@ python3 tools/mock_server.py --host 0.0.0.0   # the mock APIs, reachable by the 
 | Path | Contents |
 | --- | --- |
 | `lib/core` | Portable logic: HTTP, parsers, scheduling, screen rules. Builds for the clock and the PC. |
-| `lib/ui` | Draws the screen with LovyanGFX, through an 8-row strip (no full frame buffer fits in RAM). |
+| `lib/ui` | Draws the screen with LovyanGFX, through a 4-row strip (no full frame buffer fits in RAM). |
 | `src/device` | The clock: display, Wi-Fi, TLS, button, buzzer, LED, web service, safe mode. |
 | `src/native` | The PC scenario runner. |
 | `fixtures/scenarios`, `tools/mock_server.py` | Scripted API data for the loop. |

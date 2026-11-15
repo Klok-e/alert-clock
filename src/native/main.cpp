@@ -184,7 +184,7 @@ int main(int argc, char** argv) {
   lgfx::LGFX_Sprite canvas;
   canvas.setColorDepth(16);
   lgfx::LGFX_Sprite band;
-  band.setColorDepth(8);  // same strip format as the clock
+  band.setColorDepth(16);  // same strip format as the clock
   if (canvas.createSprite(core::kScreenPx, core::kScreenPx) == nullptr ||
       band.createSprite(core::kScreenPx, ui::kBandHeight) == nullptr) {
     std::fprintf(stderr, "cannot allocate sprites\n");

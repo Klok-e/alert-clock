@@ -333,7 +333,14 @@ void App::build_view(ViewModel& view) {
   view.threats_fresh = situation.threats_fresh;
   view.threats_in_watch = situation.threats_in_watch;
   view.area_only_in_region = snapshot_.area_only_in_region;
-  view.nearest_km = snapshot_.nearby.empty() ? -1.0f : snapshot_.nearby.front().distance_km;
+  if (!snapshot_.nearby.empty()) {
+    const Threat& nearest = snapshot_.nearby.front();
+    view.nearest_km = nearest.distance_km;
+    view.nearest_kind = nearest.kind;
+    view.nearest_heading_deg = nearest.heading_deg;
+    view.nearest_advisory = nearest.advisory;
+    view.nearest_stale = nearest.stale;
+  }
   const uint64_t uptime = advance_uptime();
   if (threats_.status.ever_succeeded) {
     view.threats_age_s = age_s(uptime, threats_.success_uptime_ms);

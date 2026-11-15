@@ -36,6 +36,11 @@ struct ViewModel {
   uint16_t threats_in_watch = 0;
   uint16_t area_only_in_region = 0;
   float nearest_km = -1.0f;      // < 0 when nothing is in range
+  // The track nearest_km describes, which may be off screen; meaningful when nearest_km >= 0.
+  ThreatKind nearest_kind = ThreatKind::Unknown;
+  int16_t nearest_heading_deg = -1;
+  bool nearest_advisory = false;
+  bool nearest_stale = false;
   bool threats_fresh = false;
   uint32_t threats_age_s = kNever;
   uint32_t alert_age_s = kNever;

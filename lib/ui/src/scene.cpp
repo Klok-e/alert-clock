@@ -2,6 +2,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+
+#if defined(ARDUINO_ARCH_ESP8266)
+#include <pgmspace.h>
+#endif
 
 namespace ui {
 namespace {
@@ -14,24 +19,67 @@ using core::ViewModel;
 
 constexpr int16_t kSize = core::kScreenPx;
 constexpr int16_t kCenter = kSize / 2;
-constexpr int16_t kClockBannerHeight = 56;
-constexpr int16_t kMapBannerHeight = 22;
-constexpr int16_t kFooterHeight = 14;
 
-// Frames pass through an RGB332 strip, so greys are picked from values RGB332 holds
-// exactly; other greys pick up a colour cast (blue has only 2 bits).
-constexpr uint16_t kBlack = lgfx::color565(0, 0, 0);
-constexpr uint16_t kWhite = lgfx::color565(255, 255, 255);
-constexpr uint16_t kGrey = lgfx::color565(146, 146, 170);
-constexpr uint16_t kDarkGrey = lgfx::color565(73, 73, 85);
-constexpr uint16_t kOrange = lgfx::color565(255, 140, 0);
-constexpr uint16_t kAmber = lgfx::color565(255, 200, 0);
-constexpr uint16_t kRed = lgfx::color565(210, 0, 0);
-constexpr uint16_t kDarkRed = lgfx::color565(130, 0, 0);
+// Palette after alerts.in.ua: navy ground, amber for drones, wine red for alerts.
+struct Rgb {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+};
 
-const char* const kWeekdays[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-const char* const kMonths[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+constexpr uint16_t to565(Rgb c) { return lgfx::color565(c.r, c.g, c.b); }
+
+// `percent` of the way from `from` to `to`.
+constexpr Rgb mix(Rgb from, Rgb to, int percent) {
+  return Rgb{static_cast<uint8_t>(from.r + (to.r - from.r) * percent / 100),
+             static_cast<uint8_t>(from.g + (to.g - from.g) * percent / 100),
+             static_cast<uint8_t>(from.b + (to.b - from.b) * percent / 100)};
+}
+
+constexpr Rgb kNavy{27, 33, 49};
+constexpr Rgb kCardRgb{35, 44, 63};
+constexpr Rgb kLineRgb{50, 61, 85};
+constexpr Rgb kWhiteRgb{255, 255, 255};
+constexpr Rgb kMutedRgb{142, 152, 173};
+constexpr Rgb kAmberRgb{224, 164, 49};
+constexpr Rgb kMaroonRgb{139, 34, 54};
+constexpr Rgb kAlertRedRgb{192, 38, 63};
+constexpr Rgb kOrangeRgb{240, 136, 40};
+constexpr Rgb kCyanRgb{63, 198, 220};
+constexpr Rgb kGreyRgb{125, 135, 156};
+
+constexpr uint16_t kBackground = to565(kNavy);
+constexpr uint16_t kCard = to565(kCardRgb);
+constexpr uint16_t kLine = to565(kLineRgb);
+constexpr uint16_t kRing = to565(mix(kNavy, kWhiteRgb, 14));
+constexpr uint16_t kWhite = to565(kWhiteRgb);
+constexpr uint16_t kMuted = to565(kMutedRgb);
+constexpr uint16_t kFaint = to565(mix(kNavy, kMutedRgb, 55));
+constexpr uint16_t kOrange = to565(kOrangeRgb);
+
+constexpr int16_t kPillHeight = 22;
+constexpr int16_t kBadgeRadius = 7;
+constexpr int16_t kFooterHeight = 18;
+
+// In flash on the clock, where plain literals occupy RAM; read with copy_name().
+#if !defined(ARDUINO_ARCH_ESP8266)
+#define PROGMEM
+#endif
+constexpr size_t kNameLength = 10;  // "Wednesday", "September" and the terminator
+const char kWeekdays[7][kNameLength] PROGMEM = {"Sunday",   "Monday", "Tuesday", "Wednesday",
+                                                "Thursday", "Friday", "Saturday"};
+const char kMonths[12][kNameLength] PROGMEM = {"January", "February", "March",     "April",
+                                               "May",     "June",     "July",      "August",
+                                               "September", "October", "November", "December"};
+
+void copy_name(char (&out)[kNameLength], const char* name) {
+#if defined(ARDUINO_ARCH_ESP8266)
+  strncpy_P(out, name, kNameLength - 1);
+#else
+  std::strncpy(out, name, kNameLength - 1);
+#endif
+  out[kNameLength - 1] = '\0';
+}
 
 // Drawing context for one strip: translates scene coordinates and skips shapes
 // that cannot touch the strip.
@@ -44,69 +92,104 @@ struct Canvas {
 };
 
 struct BannerStyle {
-  uint16_t background;
+  Rgb background;
   uint16_t text;
-  const char* long_text;
-  const char* short_text;
+  const char* label;
 };
 
-bool banner_style(Banner banner, BannerStyle& style) {
+// The banner's pill. Banner::None has a calm style on the clock face and no pill on the map.
+BannerStyle banner_style(Banner banner) {
   switch (banner) {
     case Banner::Red:
-      style = {kRed, kWhite, "AIR RAID ALERT", "ALERT"};
-      return true;
+      return {kMaroonRgb, kWhite, "Air raid alert"};
     case Banner::Yellow:
-      style = {kAmber, kBlack, "THREAT WARNING", "WARNING"};
-      return true;
+      return {kAmberRgb, kBackground, "Threat warning"};
     case Banner::Partial:
-      style = {kDarkRed, kWhite, "ALERT IN REGION", "REGION ALERT"};
-      return true;
+      return {mix(kMaroonRgb, kNavy, 35), kWhite, "Alert in region"};
     case Banner::NoData:
-      style = {kOrange, kBlack, "NO ALERT DATA", "NO DATA"};
-      return true;
+      return {kOrangeRgb, kBackground, "No alert data"};
     case Banner::None:
       break;
   }
-  return false;
+  return {kCardRgb, kMuted, "No alert"};
 }
 
-uint16_t dim(uint16_t color) {
-  // Halves each RGB565 channel.
-  return static_cast<uint16_t>((color >> 1) & 0x7BEF);
+// The map ground takes the banner's colour faintly, as alerts.in.ua fills an alerted region.
+uint16_t map_ground(Banner banner) {
+  switch (banner) {
+    case Banner::Red:
+      return to565(mix(kNavy, kMaroonRgb, 30));
+    case Banner::Partial:
+      return to565(mix(kNavy, kMaroonRgb, 18));
+    case Banner::Yellow:
+      return to565(mix(kNavy, kAmberRgb, 10));
+    case Banner::NoData:
+    case Banner::None:
+      break;
+  }
+  return kBackground;
 }
 
-uint16_t kind_color(ThreatKind kind) {
+Rgb kind_rgb(ThreatKind kind) {
   switch (kind) {
     case ThreatKind::Uav:
-      return lgfx::color565(255, 140, 0);
+      return kAmberRgb;
     case ThreatKind::Recon:
-      return lgfx::color565(0, 200, 255);
+      return kCyanRgb;
     case ThreatKind::Fpv:
-      return lgfx::color565(255, 190, 90);
+      return Rgb{240, 200, 120};
     case ThreatKind::Missile:
-      return lgfx::color565(255, 40, 40);
+      return kAlertRedRgb;
     case ThreatKind::Ballistic:
-      return lgfx::color565(255, 0, 210);
+      return Rgb{205, 70, 200};
     case ThreatKind::Kab:
-      return lgfx::color565(255, 230, 0);
+      return Rgb{245, 220, 70};
     case ThreatKind::Aircraft:
-      return kWhite;
+      return kWhiteRgb;
     case ThreatKind::Unknown:
       break;
   }
-  return kGrey;
+  return kGreyRgb;
 }
 
-void draw_banner(Canvas& c, Banner banner, int16_t height, bool long_form) {
-  BannerStyle style{};
-  if (!banner_style(banner, style) || !c.touches(0, height)) {
-    return;
+const char* kind_label(ThreatKind kind) {
+  switch (kind) {
+    case ThreatKind::Uav:
+      return "UAV";
+    case ThreatKind::Recon:
+      return "Recon";
+    case ThreatKind::Fpv:
+      return "FPV";
+    case ThreatKind::Missile:
+      return "Missile";
+    case ThreatKind::Ballistic:
+      return "Ballistic";
+    case ThreatKind::Kab:
+      return "KAB";
+    case ThreatKind::Aircraft:
+      return "Aircraft";
+    case ThreatKind::Unknown:
+      break;
   }
-  c.g.fillRect(0, c.y(0), kSize, height, style.background);
-  c.g.setTextColor(style.text);
-  c.g.setTextDatum(lgfx::textdatum_t::middle_center);
-  c.g.setFont(long_form ? &lgfx::fonts::FreeSansBold12pt7b : &lgfx::fonts::FreeSansBold9pt7b);
-  c.g.drawString(long_form ? style.long_text : style.short_text, kCenter, c.y(height / 2));
+  return "Other";
+}
+
+// Legend order: the most dangerous kinds first.
+constexpr ThreatKind kLegendOrder[] = {ThreatKind::Ballistic, ThreatKind::Missile, ThreatKind::Kab,
+                                       ThreatKind::Uav,       ThreatKind::Fpv,     ThreatKind::Recon,
+                                       ThreatKind::Aircraft,  ThreatKind::Unknown};
+constexpr size_t kKinds = sizeof(kLegendOrder) / sizeof(kLegendOrder[0]);
+
+// A marker's colour after fading for staleness and greying for advisories.
+Rgb marker_rgb(const ThreatMarker& marker, Rgb ground) {
+  const Rgb base = marker.advisory ? kGreyRgb : kind_rgb(marker.kind);
+  return marker.stale ? mix(base, ground, 50) : base;
+}
+
+Rgb rgb_from565(uint16_t color) {
+  return Rgb{static_cast<uint8_t>(((color >> 11) & 0x1F) * 255 / 31),
+             static_cast<uint8_t>(((color >> 5) & 0x3F) * 255 / 63),
+             static_cast<uint8_t>((color & 0x1F) * 255 / 31)};
 }
 
 void format_age(char* out, size_t size, uint32_t seconds) {
@@ -121,167 +204,300 @@ void format_age(char* out, size_t size, uint32_t seconds) {
   }
 }
 
-void draw_clock_panel(Canvas& c, const ViewModel& view) {
-  draw_banner(c, view.banner, kClockBannerHeight, true);
+// A rounded pill with a dot and a label; returns its width. `x` is the left edge, or the
+// centre when `centered`.
+int16_t draw_pill(Canvas& c, int32_t x, int32_t top, const BannerStyle& style, bool centered) {
+  c.g.setFont(&lgfx::fonts::FreeSansBold9pt7b);
+  const int32_t text_width = c.g.textWidth(style.label);
+  const int32_t width = 10 + 6 + 7 + text_width + 12;
+  const int32_t left = centered ? x - width / 2 : x;
+  if (c.touches(top, kPillHeight)) {
+    c.g.fillRoundRect(left, c.y(top), width, kPillHeight, kPillHeight / 2, to565(style.background));
+    c.g.fillCircle(left + 13, c.y(top + kPillHeight / 2), 3, style.text);
+    c.g.setTextColor(style.text);
+    c.g.setTextDatum(lgfx::textdatum_t::middle_left);
+    c.g.drawString(style.label, left + 23, c.y(top + kPillHeight / 2));
+  }
+  return static_cast<int16_t>(width);
+}
 
-  const int16_t time_y = 116;
-  if (c.touches(time_y - 40, 80)) {
-    char text[8];
-    if (view.time_valid) {
-      const char separator = (view.local.second % 2 == 0) ? ':' : ' ';
-      std::snprintf(text, sizeof(text), "%02u%c%02u", view.local.hour, separator, view.local.minute);
+// A filled disc with an arrow along the heading, or a dot when the heading is unknown.
+void draw_badge(Canvas& c, int32_t x, int32_t y, int16_t heading_deg, Rgb fill, bool hollow, uint16_t ground) {
+  if (!c.touches(y - kBadgeRadius - 1, 2 * kBadgeRadius + 3)) {
+    return;
+  }
+  const uint16_t color = to565(fill);
+  const bool bright = 30 * fill.r + 59 * fill.g + 11 * fill.b > 14000;  // luma above ~140
+  const uint16_t glyph = hollow ? color : (bright ? kBackground : kWhite);
+  if (hollow) {
+    c.g.fillCircle(x, c.y(y), kBadgeRadius + 1, ground);
+    c.g.drawCircle(x, c.y(y), kBadgeRadius, color);
+  } else {
+    c.g.fillCircle(x, c.y(y), kBadgeRadius + 1, bright ? ground : kWhite);
+    c.g.fillCircle(x, c.y(y), kBadgeRadius, color);
+  }
+  if (heading_deg < 0) {
+    c.g.fillCircle(x, c.y(y), 2, glyph);
+    return;
+  }
+  const float heading = static_cast<float>(heading_deg) * 3.14159265f / 180.0f;
+  const float wing = 2.5f;  // about 143 degrees, in radians
+  const int32_t tip_x = x + static_cast<int32_t>(std::lround(5.0f * std::sin(heading)));
+  const int32_t tip_y = y - static_cast<int32_t>(std::lround(5.0f * std::cos(heading)));
+  const int32_t left_x = x + static_cast<int32_t>(std::lround(4.0f * std::sin(heading + wing)));
+  const int32_t left_y = y - static_cast<int32_t>(std::lround(4.0f * std::cos(heading + wing)));
+  const int32_t right_x = x + static_cast<int32_t>(std::lround(4.0f * std::sin(heading - wing)));
+  const int32_t right_y = y - static_cast<int32_t>(std::lround(4.0f * std::cos(heading - wing)));
+  c.g.fillTriangle(tip_x, c.y(tip_y), left_x, c.y(left_y), right_x, c.y(right_y), glyph);
+}
+
+void draw_time(Canvas& c, const ViewModel& view, int32_t baseline) {
+  c.g.setFont(&lgfx::fonts::DejaVu72);
+  c.g.setTextColor(kWhite);
+  if (!view.time_valid) {
+    c.g.setTextDatum(lgfx::textdatum_t::baseline_center);
+    c.g.drawString("--:--", kCenter, c.y(baseline));
+    return;
+  }
+  // Hours and minutes are placed around a fixed colon, so the blink never shifts them.
+  char hours[4];
+  char minutes[4];
+  std::snprintf(hours, sizeof(hours), "%02u", view.local.hour);
+  std::snprintf(minutes, sizeof(minutes), "%02u", view.local.minute);
+  const int32_t half_colon = c.g.textWidth(":") / 2;
+  c.g.setTextDatum(lgfx::textdatum_t::baseline_right);
+  c.g.drawString(hours, kCenter - half_colon, c.y(baseline));
+  c.g.setTextDatum(lgfx::textdatum_t::baseline_left);
+  c.g.drawString(minutes, kCenter + half_colon, c.y(baseline));
+  if (view.local.second % 2 == 0) {
+    c.g.setTextDatum(lgfx::textdatum_t::baseline_center);
+    c.g.drawString(":", kCenter, c.y(baseline - 4));
+  }
+}
+
+// The card under the clock: what NEPTUN shows near home.
+void draw_threat_card(Canvas& c, const ViewModel& view, int32_t top) {
+  constexpr int32_t kLeft = 14;
+  constexpr int32_t kWidth = kSize - 2 * kLeft;
+  constexpr int32_t kHeight = 48;
+  if (!c.touches(top, kHeight)) {
+    return;
+  }
+  char title[32];
+  char detail[40];
+  Rgb badge = kGreyRgb;
+  uint16_t title_color = kWhite;
+  int16_t heading = -1;
+  bool hollow = false;
+  if (!view.threats_fresh) {
+    char age[12];
+    format_age(age, sizeof(age), view.threats_age_s);
+    std::snprintf(title, sizeof(title), "Map data %s old", age);
+    std::snprintf(detail, sizeof(detail), "tracks may have moved");
+    badge = kOrangeRgb;
+    title_color = kOrange;
+  } else if (view.area_only_in_region > 0) {
+    std::snprintf(title, sizeof(title), "%u in your region", static_cast<unsigned>(view.area_only_in_region));
+    std::snprintf(detail, sizeof(detail), "position not reported");
+    badge = kAmberRgb;
+  } else if (view.nearest_km >= 0.0f) {
+    const int km = static_cast<int>(std::lround(view.nearest_km));
+    if (view.threats_in_watch > 0) {
+      std::snprintf(title, sizeof(title), "%u nearby", static_cast<unsigned>(view.threats_in_watch));
     } else {
-      std::snprintf(text, sizeof(text), "--:--");
+      std::snprintf(title, sizeof(title), "Nothing close");
     }
-    c.g.setFont(&lgfx::fonts::Font7);
-    c.g.setTextSize(1.4f);
-    c.g.setTextColor(kWhite);
-    c.g.setTextDatum(lgfx::textdatum_t::middle_center);
-    c.g.drawString(text, kCenter, c.y(time_y));
-    c.g.setTextSize(1.0f);
+    // Advisories are observations, not shelter signals: hollow, and named as such.
+    std::snprintf(detail, sizeof(detail), view.nearest_advisory ? "nearest advisory %d km" : "nearest track %d km",
+                  km);
+    ThreatMarker nearest;
+    nearest.kind = view.nearest_kind;
+    nearest.advisory = view.nearest_advisory;
+    nearest.stale = view.nearest_stale;
+    badge = marker_rgb(nearest, kCardRgb);
+    heading = view.nearest_heading_deg;
+    hollow = view.nearest_advisory;
+  } else {
+    char age[12];
+    format_age(age, sizeof(age), view.threats_age_s);
+    std::snprintf(title, sizeof(title), "No tracks nearby");
+    std::snprintf(detail, sizeof(detail), "updated %s ago", age);
+    title_color = kMuted;
   }
 
-  const int16_t date_y = 172;
+  c.g.fillRoundRect(kLeft, c.y(top), kWidth, kHeight, 10, kCard);
+  c.g.drawRoundRect(kLeft, c.y(top), kWidth, kHeight, 10, kLine);
+  draw_badge(c, kLeft + 22, top + kHeight / 2, heading, badge, hollow, kCard);
+  c.g.setTextDatum(lgfx::textdatum_t::baseline_left);
+  c.g.setFont(&lgfx::fonts::FreeSansBold9pt7b);
+  c.g.setTextColor(title_color);
+  c.g.drawString(title, kLeft + 40, c.y(top + 21));
+  c.g.setFont(&lgfx::fonts::Font2);
+  c.g.setTextColor(kMuted);
+  c.g.setTextDatum(lgfx::textdatum_t::top_left);
+  c.g.drawString(detail, kLeft + 40, c.y(top + 26));
+}
+
+void draw_clock_panel(Canvas& c, const ViewModel& view) {
+  c.g.fillScreen(kBackground);
+  draw_pill(c, kCenter, 12, banner_style(view.banner), true);
+
+  const int32_t time_baseline = 112;
+  if (c.touches(time_baseline - 56, 60)) {
+    draw_time(c, view, time_baseline);
+  }
+
+  const int16_t date_y = 140;
   if (c.touches(date_y - 12, 24)) {
-    char text[24];
+    char text[32];
     if (view.time_valid) {
-      std::snprintf(text, sizeof(text), "%s %u %s", kWeekdays[view.local.weekday % 7],
-                    view.local.day, kMonths[(view.local.month + 11) % 12]);
+      char weekday[kNameLength];
+      char month[kNameLength];
+      copy_name(weekday, kWeekdays[view.local.weekday % 7]);
+      copy_name(month, kMonths[(view.local.month + 11) % 12]);
+      std::snprintf(text, sizeof(text), "%s, %u %s", weekday, view.local.day, month);
     } else {
       std::snprintf(text, sizeof(text), "waiting for time");
     }
     c.g.setFont(&lgfx::fonts::FreeSans9pt7b);
-    c.g.setTextColor(kGrey);
+    c.g.setTextColor(kMuted);
     c.g.setTextDatum(lgfx::textdatum_t::middle_center);
     c.g.drawString(text, kCenter, c.y(date_y));
   }
 
-  const int16_t status_y = 212;
-  if (c.touches(status_y - 10, 20)) {
-    char text[40];
-    uint16_t color = kGrey;
-    if (!view.threats_fresh) {
-      char age[12];
-      format_age(age, sizeof(age), view.threats_age_s);
-      std::snprintf(text, sizeof(text), "map data: %s old", age);
-      color = kOrange;
-    } else if (view.area_only_in_region > 0) {
-      std::snprintf(text, sizeof(text), "%u in region, no position",
-                    static_cast<unsigned>(view.area_only_in_region));
-      color = kAmber;
-    } else if (view.nearest_km >= 0.0f) {
-      std::snprintf(text, sizeof(text), "nearest track %d km",
-                    static_cast<int>(std::lround(view.nearest_km)));
-    } else {
-      text[0] = '\0';
-    }
-    c.g.setFont(&lgfx::fonts::Font2);
-    c.g.setTextColor(color);
-    c.g.setTextDatum(lgfx::textdatum_t::middle_center);
-    c.g.drawString(text, kCenter, c.y(status_y));
-  }
-  // Every status line above comes from NEPTUN, whose terms require a visible credit.
-  const int16_t credit_y = 231;
+  draw_threat_card(c, view, 162);
+
+  // The card shows NEPTUN data, whose terms require a visible credit.
+  const int16_t credit_y = 228;
   if (c.touches(credit_y - 4, 9)) {
     c.g.setFont(&lgfx::fonts::Font0);
-    c.g.setTextColor(kGrey);
+    c.g.setTextColor(kMuted);
     c.g.setTextDatum(lgfx::textdatum_t::middle_center);
     c.g.drawString("data: NEPTUN", kCenter, c.y(credit_y));
   }
 }
 
-void draw_marker(Canvas& c, const ThreatMarker& marker) {
-  const int32_t x = marker.point.x;
-  const int32_t y = marker.point.y;
-  uint16_t color = marker.advisory ? kGrey : kind_color(marker.kind);
-  if (marker.stale) {
-    color = dim(color);
-  }
-  if (marker.uncertainty_px > 0 && c.touches(y - marker.uncertainty_px, 2 * marker.uncertainty_px + 1)) {
-    c.g.drawCircle(x, c.y(y), marker.uncertainty_px, dim(dim(color)));
-  }
-  if (!c.touches(y - 9, 19)) {
-    return;
-  }
-  if (marker.heading_deg < 0) {
+// Coloured squares with a count per kind, most dangerous first, as many as fit before `right`.
+void draw_legend(Canvas& c, const ViewModel& view, int32_t baseline, int32_t right) {
+  uint16_t counts[kKinds] = {};
+  for (const ThreatMarker& marker : view.markers) {
     if (marker.advisory) {
-      c.g.drawCircle(x, c.y(y), 4, color);
-    } else {
-      c.g.fillCircle(x, c.y(y), 4, color);
+      continue;
     }
-    return;
+    for (size_t i = 0; i < kKinds; ++i) {
+      if (kLegendOrder[i] == marker.kind) {
+        ++counts[i];
+        break;
+      }
+    }
   }
-  const float heading = static_cast<float>(marker.heading_deg) * 3.14159265f / 180.0f;
-  const float wing = 2.44f;  // 140 degrees, in radians
-  const int32_t tip_x = x + static_cast<int32_t>(std::lround(8.0f * std::sin(heading)));
-  const int32_t tip_y = y - static_cast<int32_t>(std::lround(8.0f * std::cos(heading)));
-  const int32_t left_x = x + static_cast<int32_t>(std::lround(6.0f * std::sin(heading + wing)));
-  const int32_t left_y = y - static_cast<int32_t>(std::lround(6.0f * std::cos(heading + wing)));
-  const int32_t right_x = x + static_cast<int32_t>(std::lround(6.0f * std::sin(heading - wing)));
-  const int32_t right_y = y - static_cast<int32_t>(std::lround(6.0f * std::cos(heading - wing)));
-  if (marker.advisory) {
-    c.g.drawTriangle(tip_x, c.y(tip_y), left_x, c.y(left_y), right_x, c.y(right_y), color);
-  } else {
-    c.g.fillTriangle(tip_x, c.y(tip_y), left_x, c.y(left_y), right_x, c.y(right_y), color);
+  c.g.setFont(&lgfx::fonts::Font0);
+  c.g.setTextColor(kWhite);
+  c.g.setTextDatum(lgfx::textdatum_t::baseline_left);
+  int32_t x = 6;
+  for (size_t i = 0; i < kKinds; ++i) {
+    if (counts[i] == 0) {
+      continue;
+    }
+    char text[16];
+    std::snprintf(text, sizeof(text), "%s %u", kind_label(kLegendOrder[i]), static_cast<unsigned>(counts[i]));
+    const int32_t width = 11 + c.g.textWidth(text);
+    if (x + width > right) {
+      break;
+    }
+    c.g.fillRoundRect(x, c.y(baseline - 7), 7, 7, 2, to565(kind_rgb(kLegendOrder[i])));
+    c.g.drawString(text, x + 11, c.y(baseline));
+    x += width + 8;
   }
 }
 
 void draw_map_panel(Canvas& c, const ViewModel& view) {
+  const uint16_t ground = map_ground(view.banner);
+  const Rgb ground_rgb = rgb_from565(ground);
+  c.g.fillScreen(ground);
+
   c.g.setFont(&lgfx::fonts::Font0);
   c.g.setTextDatum(lgfx::textdatum_t::bottom_center);
+  c.g.setTextColor(kFaint);
   for (const uint8_t km : view.ring_km) {
     const int32_t radius = static_cast<int32_t>(std::lround(static_cast<float>(km) * view.px_per_km));
-    c.g.drawCircle(kCenter, c.y(kCenter), radius, kDarkGrey);
+    c.g.drawCircle(kCenter, c.y(kCenter), radius, kRing);
     char label[8];
-    std::snprintf(label, sizeof(label), "%u", static_cast<unsigned>(km));
-    c.g.setTextColor(kDarkGrey);
+    std::snprintf(label, sizeof(label), "%u km", static_cast<unsigned>(km));
     c.g.drawString(label, kCenter, c.y(kCenter - radius - 1));
   }
-  if (c.touches(kCenter - 6, 13)) {
-    c.g.drawFastHLine(kCenter - 6, c.y(kCenter), 13, kWhite);
-    c.g.drawFastVLine(kCenter, c.y(kCenter - 6), 13, kWhite);
-  }
+
+  // Uncertainty halos first, so no halo covers a badge.
   for (const ThreatMarker& marker : view.markers) {
-    draw_marker(c, marker);
+    const int32_t r = marker.uncertainty_px;
+    if (r <= kBadgeRadius || !c.touches(marker.point.y - r, 2 * r + 1)) {
+      continue;
+    }
+    const Rgb color = marker_rgb(marker, ground_rgb);
+    c.g.fillCircle(marker.point.x, c.y(marker.point.y), r, to565(mix(ground_rgb, color, 16)));
+    c.g.drawCircle(marker.point.x, c.y(marker.point.y), r, to565(mix(ground_rgb, color, 45)));
   }
 
-  draw_banner(c, view.banner, kMapBannerHeight, false);
-  const int16_t clock_y = view.banner == Banner::None ? 0 : kMapBannerHeight;
-  if (c.touches(clock_y, 16)) {
+  if (c.touches(kCenter - 6, 13)) {
+    c.g.drawCircle(kCenter, c.y(kCenter), 5, kWhite);
+    c.g.fillCircle(kCenter, c.y(kCenter), 1, kWhite);
+  }
+
+  // Farthest first, so the nearest track is drawn on top.
+  for (size_t i = view.markers.size(); i-- > 0;) {
+    const ThreatMarker& marker = view.markers[i];
+    draw_badge(c, marker.point.x, marker.point.y, marker.heading_deg, marker_rgb(marker, ground_rgb),
+               marker.advisory, ground);
+  }
+
+  // Top: the banner pill, the time pill and north.
+  const int32_t pill_top = 6;
+  if (view.banner != Banner::None) {
+    draw_pill(c, 6, pill_top, banner_style(view.banner), false);
+  }
+  if (c.touches(pill_top, kPillHeight)) {
     char text[8];
     if (view.time_valid) {
       std::snprintf(text, sizeof(text), "%02u:%02u", view.local.hour, view.local.minute);
     } else {
       std::snprintf(text, sizeof(text), "--:--");
     }
-    c.g.setFont(&lgfx::fonts::Font2);
+    c.g.setFont(&lgfx::fonts::FreeSansBold9pt7b);
+    const int32_t width = c.g.textWidth(text) + 16;
+    c.g.fillRoundRect(kSize - 6 - width, c.y(pill_top), width, kPillHeight, kPillHeight / 2, kBackground);
     c.g.setTextColor(kWhite);
-    c.g.setTextDatum(lgfx::textdatum_t::top_right);
-    c.g.drawString(text, kSize - 4, c.y(clock_y + 2));
-    c.g.setTextDatum(lgfx::textdatum_t::top_left);
-    c.g.drawString("N", 4, c.y(clock_y + 2));
+    c.g.setTextDatum(lgfx::textdatum_t::middle_center);
+    c.g.drawString(text, kSize - 6 - width / 2, c.y(pill_top + kPillHeight / 2));
+    if (view.banner == Banner::None) {
+      c.g.setFont(&lgfx::fonts::Font2);
+      c.g.setTextColor(kMuted);
+      c.g.setTextDatum(lgfx::textdatum_t::middle_left);
+      c.g.drawString("N", 8, c.y(pill_top + kPillHeight / 2));
+    }
   }
 
+  // Footer: legend or data age, and NEPTUN's credit, which its terms require.
   const int16_t footer_y = kSize - kFooterHeight;
   if (c.touches(footer_y, kFooterHeight)) {
-    char text[32];
-    uint16_t color = kGrey;
+    c.g.fillRect(0, c.y(footer_y), kSize, kFooterHeight, kBackground);
+    c.g.drawFastHLine(0, c.y(footer_y), kSize, kLine);
+    const int32_t baseline = kSize - 6;
+    c.g.setFont(&lgfx::fonts::Font0);
+    const int32_t credit_width = c.g.textWidth("data: NEPTUN");
+    c.g.setTextColor(kMuted);
+    c.g.setTextDatum(lgfx::textdatum_t::baseline_right);
+    c.g.drawString("data: NEPTUN", kSize - 6, c.y(baseline));
     if (!view.threats_fresh) {
       char age[12];
+      char text[24];
       format_age(age, sizeof(age), view.threats_age_s);
-      std::snprintf(text, sizeof(text), "DATA %s OLD", age);
-      color = kOrange;
+      std::snprintf(text, sizeof(text), "Data %s old", age);
+      c.g.setTextColor(kOrange);
+      c.g.setTextDatum(lgfx::textdatum_t::baseline_left);
+      c.g.drawString(text, 6, c.y(baseline));
     } else {
-      std::snprintf(text, sizeof(text), "%u near", static_cast<unsigned>(view.threats_in_watch));
+      draw_legend(c, view, baseline, kSize - 12 - credit_width);
     }
-    c.g.setFont(&lgfx::fonts::Font0);
-    c.g.setTextDatum(lgfx::textdatum_t::bottom_left);
-    c.g.setTextColor(color);
-    c.g.drawString(text, 4, c.y(kSize - 3));
-    // NEPTUN's terms require a visible credit next to its data.
-    c.g.setTextDatum(lgfx::textdatum_t::bottom_right);
-    c.g.setTextColor(kGrey);
-    c.g.drawString("data: NEPTUN", kSize - 4, c.y(kSize - 3));
   }
 }
 
@@ -299,7 +515,6 @@ void draw_scene(lgfx::LovyanGFX& g, int16_t top, const ViewModel& view) {
 void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const ViewModel& view) {
   target.startWrite();
   for (int16_t top = 0; top < kSize; top = static_cast<int16_t>(top + kBandHeight)) {
-    band.fillScreen(kBlack);
     draw_scene(band, top, view);
     band.pushSprite(&target, 0, top);
   }
