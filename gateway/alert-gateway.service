@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=alert-gateway
+User=@USER@
 WorkingDirectory=@GATEWAY_DIR@
 ExecStart=@GATEWAY_DIR@/.venv/bin/python -m alert_gateway --config /etc/alert-gateway.toml
 Restart=on-failure

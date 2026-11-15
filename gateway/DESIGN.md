@@ -185,7 +185,8 @@ pytest fails while that file is out of date with the encoder.
 
 ## Gateway on the Pi
 
-- Python, run by systemd. `gateway/install.sh` creates a virtualenv, copies
+- Python, run by systemd as the account that ran `sudo gateway/install.sh` (e.g. `pi`). The
+  installer creates a virtualenv, copies
   `gateway/alert-gateway.example.toml` to `/etc/alert-gateway.toml` if it is absent, generates
   a random 32-byte `hmac_key` there as 64 hex characters, prints the matching `#define CLOCK_GATEWAY_KEY` line for
   the clock's `include/secrets.h`, and enables the `alert-gateway` service. Updates: `git pull`

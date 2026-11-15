@@ -33,8 +33,9 @@ region ("areaOnly") are never drawn; the clock counts the ones in your oblast.
 
 ## Setup
 
-1. The gateway, on a Raspberry Pi (Raspberry Pi OS): clone this repository, run
-   `sudo gateway/install.sh`, set your home coordinates in `/etc/alert-gateway.toml`, then
+1. The gateway, on a Raspberry Pi (Raspberry Pi OS): clone this repository anywhere under
+   your account (e.g. `~/alert-clock`), run `sudo gateway/install.sh` from that account (the
+   service runs as it, e.g. `pi`), set your home coordinates in `/etc/alert-gateway.toml`, then
    `sudo systemctl restart alert-gateway`. The installer generates the shared key and prints
    the `#define CLOCK_GATEWAY_KEY` line for the next step. Updates: `git pull` and the restart.
 2. Install PlatformIO Core 6.2 (`uv tool install platformio` or `pipx install platformio`).
