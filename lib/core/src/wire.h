@@ -8,7 +8,7 @@
 #include "alerts.h"
 #include "sha256.h"
 
-// The gateway protocol, version 2: gateway/PROTOCOL.md.
+// The gateway protocol, version 3: gateway/PROTOCOL.md.
 namespace core {
 
 enum class ThreatKind : uint8_t { Uav, Recon, Fpv, Missile, Ballistic, Kab, Aircraft, Unknown };
@@ -87,21 +87,28 @@ class Basemap {
     if (!valid_ || y < 0 || y >= kScreenPx) {
       return;
     }
-    const uint8_t* row = rows_ + offset(y);
-    const uint8_t count = row[0];
+    size_t position = offset(y);
+    const uint8_t count = rows_[position++];
     int16_t x = 0;
     for (uint8_t i = 0; i < count; ++i) {
-      const uint8_t length = row[1 + 2 * i];
-      fn(x, static_cast<int16_t>(length), palette_[row[2 + 2 * i] & 0x0F]);
+      uint8_t length = 0;
+      uint8_t index = 0;
+      position += read_run(position, length, index);
+      fn(x, static_cast<int16_t>(length), palette_[index]);
       x = static_cast<int16_t>(x + length);
     }
   }
 
  private:
   uint16_t offset(int16_t y) const;
+  // Reads the run at `position` in the rows area: one byte, length << 4 | index, or the index
+  // with length nibble 0 and then a length byte of 16-255. Returns the bytes read; 0 when the
+  // run would pass the end of the rows area or its length byte is under 16.
+  size_t read_run(size_t position, uint8_t& length, uint8_t& index) const;
 
   const uint8_t* offsets_ = nullptr;
   const uint8_t* rows_ = nullptr;
+  size_t rows_length_ = 0;
   uint16_t palette_[16] = {};
   uint32_t version_ = 0;
   bool valid_ = false;

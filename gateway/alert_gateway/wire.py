@@ -8,7 +8,7 @@ import struct
 import zlib
 from dataclasses import dataclass, field
 
-VERSION = 2
+VERSION = 3
 TYPE_SNAPSHOT = 1
 TYPE_BASEMAP = 2
 MAC_BYTES = 32
@@ -145,7 +145,9 @@ def encode_basemap(palette: list[int], rows: list[bytes], nonce: int, key: bytes
 
 
 def encode_row(indices: list[int]) -> bytes:
-    """Run-length encodes one row of 240 palette indices."""
+    """Run-length encodes one row of 240 palette indices: a run count, then one byte per run,
+    length << 4 | index, for runs of 1-15 pixels, or the index alone (length nibble 0) followed by
+    a length byte for longer runs."""
     runs: list[tuple[int, int]] = []
     for value in indices:
         if runs and runs[-1][1] == value and runs[-1][0] < 255:
@@ -154,15 +156,23 @@ def encode_row(indices: list[int]) -> bytes:
             runs.append((1, value))
     if len(runs) > 255:
         raise ValueError("row has more than 255 runs")
-    return bytes([len(runs)]) + b"".join(bytes([n, v & 0x0F]) for n, v in runs)
+    out = bytearray([len(runs)])
+    for length, value in runs:
+        out += bytes([length << 4 | value & 0x0F]) if length <= 15 else bytes([value & 0x0F, length])
+    return bytes(out)
 
 
 def decode_row(row: bytes) -> list[int]:
-    count = row[0]
     out: list[int] = []
-    for i in range(count):
-        length, value = row[1 + 2 * i], row[2 + 2 * i]
-        out += [value] * length
+    position = 1
+    for _ in range(row[0]):
+        tag = row[position]
+        length = tag >> 4
+        position += 1
+        if length == 0:
+            length = row[position]
+            position += 1
+        out += [tag & 0x0F] * length
     return out
 
 

@@ -143,9 +143,10 @@ pytest fails while that file is out of date with the encoder.
   those layers while the Pi retries with backoff.
 - **Redraw.** When any visible raion's fill changes, the Pi redraws the basemap (so its CRC-32
   version changes).
-- **Encoding.** Each row is a run count followed by (length, colour) byte pairs; a table of 240
-  16-bit row offsets lets the clock decode one 4-row strip at a time. The whole basemap message
-  fits in 20,480 bytes.
+- **Encoding.** Each row is a run count followed by its runs, one byte (length and colour
+  nibbles) for runs up to 15 pixels and two for longer ones, about 40% smaller than byte pairs
+  on real maps of Kyiv and Kharkiv; a table of 240 16-bit row offsets lets the clock decode one
+  4-row strip at a time. The whole basemap message fits in 20,480 bytes.
 - **Water.** Water areas (`natural=water` ways, and relations whose member ways join into closed
   outer rings, with their inner rings as holes) are filled; areas under 20 screen pixels are left
   out as speckle. Named `waterway=river` ways are 1-pixel lines; unnamed ones are left out. Water
@@ -189,9 +190,9 @@ pytest fails while that file is out of date with the encoder.
 - **Screens.** All text is Ukrainian, in Inter converted by `tools/make_fonts.py` (Pillow) to
   GFX fonts in `lib/ui/src/fonts.cpp`, holding ASCII and the Ukrainian Cyrillic letters (А–я,
   Ґґ, Єє, Іі, Її), plus `·` (U+00B7), `©` (U+00A9) and the apostrophe `ʼ` (U+02BC), kept in
-  flash. The credit does not fit one 240-pixel line, so it takes two: "неофіційне джерело",
-  then "дані: neptun.in.ua · © OpenStreetMap". On the map the first line shares the footer's
-  top line with the legend, at its right; on the clock face both lines are centred. At start-up the clock shows "Неофіційне джерело. Орієнтуйтеся на
+  flash. The credit "дані: neptun.in.ua · © OpenStreetMap" is centred on one line.
+  On the map the legend or data age occupies the footer line above the credit.
+  At start-up the clock shows "Неофіційне джерело. Орієнтуйтеся на
   офіційні сигнали тривоги." for 4 s. NEPTUN's terms §3 (a visible link next to its data) and §5
   (state that it is unofficial and refer users to official signals) require these.
 - **RAM.** The last build with HTTPS used 42,092 bytes of static RAM. Removing HTTPS-era state

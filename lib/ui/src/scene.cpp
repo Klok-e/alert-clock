@@ -61,7 +61,6 @@ constexpr int16_t kFooterHeight = 30;
 
 // Text, in flash: on the clock plain literals occupy RAM. Read with flash_copy/flash_format.
 const char kCredit[] PROGMEM = "дані: neptun.in.ua · © OpenStreetMap";
-const char kUnofficial[] PROGMEM = "неофіційне джерело";
 const char kNoticeLines[4][40] PROGMEM = {"Неофіційне джерело.", "Орієнтуйтеся на", "офіційні сигнали",
                                          "тривоги."};
 const char kNoTime[] PROGMEM = "--:--";
@@ -362,25 +361,10 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
   c.ram_text(detail, kLeft + 40, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);
 }
 
-// NEPTUN's terms require a visible link and an "unofficial" note; OpenStreetMap's, the credit.
-// The two do not fit one 240-pixel line, so the note goes on the line above: centred, or at the
-// right edge when `unofficial_x` is given.
-void draw_credit(Canvas& c, int32_t baseline, int32_t unofficial_x = kCenter) {
+void draw_credit(Canvas& c, int32_t baseline) {
   if (c.touches(baseline - 10, 13)) {
     c.text(kCredit, kCenter, baseline, &kInterSmall, kMuted, lgfx::textdatum_t::baseline_center);
   }
-  const int32_t above = baseline - 13;
-  if (c.touches(above - 10, 13)) {
-    c.text(kUnofficial, unofficial_x, above, &kInterSmall, kMuted,
-           unofficial_x == kCenter ? lgfx::textdatum_t::baseline_center : lgfx::textdatum_t::baseline_right);
-  }
-}
-
-int32_t unofficial_width(Canvas& c) {
-  char text[48];
-  flash_copy(text, sizeof(text), kUnofficial);
-  c.g.setFont(&kInterSmall);
-  return c.g.textWidth(text);
 }
 
 void draw_clock_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
@@ -546,9 +530,9 @@ void draw_map_panel(Canvas& c, const ViewModel& view, const Snapshot& s) {
       flash_format(text, sizeof(text), kMapStale, age);
       c.ram_text(text, 6, first_baseline, &kInterSmall, kOrange, lgfx::textdatum_t::baseline_left);
     } else {
-      draw_legend(c, s, first_baseline, kSize - 14 - unofficial_width(c));
+      draw_legend(c, s, first_baseline, kSize - 6);
     }
-    draw_credit(c, kSize - 4, kSize - 6);
+    draw_credit(c, kSize - 4);
   }
 }
 

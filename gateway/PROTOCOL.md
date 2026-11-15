@@ -1,4 +1,4 @@
-# Clock ↔ gateway protocol, version 2
+# Clock ↔ gateway protocol, version 3
 
 Plain HTTP/1.0 on the gateway's port (default 8080). Every value is little-endian. Every reply
 body ends with a 32-byte HMAC-SHA256 over all bytes before it, keyed with the shared 32-byte
@@ -15,7 +15,7 @@ change to either side, rerun it (a pytest fails until you do).
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| 0 | u8 | version = 2 |
+| 0 | u8 | version = 3 |
 | 1 | u8 | type: 1 snapshot, 2 basemap |
 | 2 | u32 | nonce, echoed from the request's `n` parameter (8 hex digits) |
 
@@ -58,9 +58,10 @@ A snapshot with 24 markers of 6 trail points is 885 bytes (6 header + 31 fixed +
 | u16 | rows area length |
 | bytes | rows area |
 
-Each row: u8 run count, then run count × (u8 length 1–255, u8 palette index 0–15); a row's
-lengths sum to 240. The whole body, MAC included, is at most 20,480 bytes. When the gateway has
-no basemap it answers 404.
+Each row: u8 run count, then one entry per run. A run of 1–15 pixels is one byte,
+`length << 4 | palette index`; a longer run is the palette index alone (length nibble 0), then
+a u8 length of 16–255. A row's lengths sum to 240. The whole body, MAC included, is at most
+20,480 bytes. When the gateway has no basemap it answers 404.
 
 ## Test endpoint (`--test` only)
 

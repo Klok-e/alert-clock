@@ -3,7 +3,7 @@
 namespace core {
 namespace {
 
-constexpr uint8_t kVersion = 2;
+constexpr uint8_t kVersion = 3;
 constexpr uint8_t kTypeSnapshot = 1;
 constexpr uint8_t kTypeBasemap = 2;
 constexpr size_t kHeaderBytes = 6;
@@ -244,6 +244,23 @@ uint16_t Basemap::offset(int16_t y) const {
   return static_cast<uint16_t>(offsets_[i] | (offsets_[i + 1] << 8));
 }
 
+size_t Basemap::read_run(size_t position, uint8_t& length, uint8_t& index) const {
+  if (position >= rows_length_) {
+    return 0;
+  }
+  const uint8_t tag = rows_[position];
+  index = tag & 0x0F;
+  length = tag >> 4;
+  if (length != 0) {
+    return 1;
+  }
+  if (position + 1 >= rows_length_) {
+    return 0;
+  }
+  length = rows_[position + 1];
+  return length < 16 ? 0 : 2;  // shorter runs take the one-byte form
+}
+
 WireResult Basemap::load(const uint8_t* body, size_t length, const GatewayKey& key, uint32_t nonce) {
   valid_ = false;
   size_t body_length = 0;
@@ -267,23 +284,24 @@ WireResult Basemap::load(const uint8_t* body, size_t length, const GatewayKey& k
   if (in.failed || in.position() + rows_length != body_length) {
     return WireResult::Malformed;
   }
+  rows_length_ = rows_length;
   // Every row must lie inside the rows area and cover exactly 240 pixels.
   for (int16_t y = 0; y < kScreenPx; ++y) {
-    const size_t start = offset(y);
-    if (start >= rows_length) {
+    size_t position = offset(y);
+    if (position >= rows_length) {
       return WireResult::Malformed;
     }
-    const uint8_t count = rows_[start];
-    if (start + 1 + 2 * static_cast<size_t>(count) > rows_length) {
-      return WireResult::Malformed;
-    }
+    const uint8_t count = rows_[position++];
     int total = 0;
     for (uint8_t i = 0; i < count; ++i) {
-      const uint8_t run = rows_[start + 1 + 2 * i];
-      if (run == 0) {
+      uint8_t run_length = 0;
+      uint8_t index = 0;
+      const size_t used = read_run(position, run_length, index);
+      if (used == 0) {
         return WireResult::Malformed;
       }
-      total += run;
+      position += used;
+      total += run_length;
     }
     if (total != kScreenPx) {
       return WireResult::Malformed;

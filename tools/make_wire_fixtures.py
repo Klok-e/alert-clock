@@ -40,6 +40,8 @@ def basemap():
     for y in range(wire.SCREEN):
         if y == 120:
             rows.append(wire.encode_row([0] * 100 + [1] * 40 + [5] * 100))
+        elif y == 121:  # short runs, one byte each, then a long one
+            rows.append(wire.encode_row([2] * 7 + [15] * 1 + [3] * 15 + [4] * 217))
         else:
             rows.append(wire.encode_row([y % 3] * wire.SCREEN))
     return palette, rows

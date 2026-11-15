@@ -150,6 +150,22 @@ void test_basemap_from_the_gateway_draws_its_runs() {
   TEST_ASSERT_EQUAL(140, runs[2].x);
   TEST_ASSERT_EQUAL(100, runs[2].length);
   TEST_ASSERT_EQUAL_HEX16(0x18CB, runs[2].color);  // palette[5]
+
+  // Runs of up to 15 pixels take one byte each; this row mixes them with a long one.
+  runs.clear();
+  map.for_each_run(121, [&](int16_t x, int16_t length, uint16_t color) { runs.push_back({x, length, color}); });
+  TEST_ASSERT_EQUAL(4, static_cast<int>(runs.size()));
+  TEST_ASSERT_EQUAL(7, runs[0].length);
+  TEST_ASSERT_EQUAL_HEX16(0x18C8, runs[0].color);  // palette[2]
+  TEST_ASSERT_EQUAL(7, runs[1].x);
+  TEST_ASSERT_EQUAL(1, runs[1].length);
+  TEST_ASSERT_EQUAL_HEX16(0x18D5, runs[1].color);  // palette[15]
+  TEST_ASSERT_EQUAL(8, runs[2].x);
+  TEST_ASSERT_EQUAL(15, runs[2].length);
+  TEST_ASSERT_EQUAL_HEX16(0x18C9, runs[2].color);  // palette[3]
+  TEST_ASSERT_EQUAL(23, runs[3].x);
+  TEST_ASSERT_EQUAL(217, runs[3].length);
+  TEST_ASSERT_EQUAL_HEX16(0x18CA, runs[3].color);  // palette[4]
 }
 
 // Rows are decoded one strip at a time straight from the download buffer, so every row
@@ -163,10 +179,12 @@ void test_signed_basemap_with_a_bad_row_is_refused_and_not_drawn() {
     size_t offset;
     uint8_t value;
   };
+  // Row 0 is one 240-pixel run: count 1, then index 0 with length nibble 0, then length 240.
   for (const Edit& edit : {Edit{kOffsets + 2 * 239 + 1, 0xFF},  // last row's offset past the rows
-                           Edit{kRows + 1, 239},                // first row covers 239 pixels
-                           Edit{kRows + 1, 0},                  // a zero-length run
-                           Edit{kRows, 0x80}}) {                // run count past the rows
+                           Edit{kRows + 2, 239},                // first row covers 239 pixels
+                           Edit{kRows + 2, 0},                  // a zero-length long run
+                           Edit{kRows + 1, 0xF0},               // a 15-pixel short run instead
+                           Edit{kRows, 0x80}}) {                // runs read on into later rows
     std::vector<uint8_t> edited = message;
     edited[edit.offset] = edit.value;
     resign(edited, g_key);
