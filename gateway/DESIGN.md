@@ -65,14 +65,17 @@ REST at most once every 5 s and recommends the WebSocket stream for live use.
   entries (`key`, `name`, `oblast`, `since`, `level`):
   - an entry's level is Yellow when `level` is `yellow`, and Red otherwise (including `red`,
     missing or unknown values);
-  - the home raion's entry (in `raions`, matched by `key`) and the home oblast's entry (in
-    `oblasts`, matched by `key`) each give their level; when both exist, the more severe wins;
-  - otherwise, any `raions` entry whose `oblast` equals the home oblast feature's `region`
-    property gives Partial. A Kyiv city home never gets Partial: Kyiv city has no raions, and
-    alerts in Київська область do not count;
+  - only the smallest unit home lies in gives Yellow or Red: the home raion's entry (in `raions`,
+    matched by `key`), or for a home without a raion (Kyiv city) the home oblast's entry (in
+    `oblasts`, matched by `key`). An oblast entry does not alert a home with a raion: an oblast
+    alert can exclude raions, and the live feed lists such alerts as the alerted raions. A home
+    outside Kyiv city that lies in no raion gets at most Partial, and start-up logs a warning;
+  - otherwise, the home oblast's entry, or any `raions` entry whose `oblast` equals the home
+    oblast feature's `region` property, gives Partial. A Kyiv city home never gets Partial:
+    Kyiv city has no raions, and alerts in Київська область do not count;
   - otherwise None. A stale alerts source sends Unknown.
 - **Alert duration.** With a Yellow or Red level, the time since the earliest readable `since`
-  among home's raion and oblast entries, so an escalation from yellow to red keeps counting.
+  among the entries that give home's level, so an escalation from yellow to red keeps counting.
   None for Partial, None and Unknown, or when no home entry has a readable `since`.
 - **Geometry.** Home is the screen centre (120, 120); `px_per_km` is 120 / map radius. Ring
   radii follow `choose_rings` in `gateway/alert_gateway/geo.py`: the largest step from
@@ -203,9 +206,11 @@ pytest fails while that file is out of date with the encoder.
   all sounds; night 23:00–10:00, screen/LED 5%, automatic sounds off. Until time sync it uses
   night settings. Automatic sounds disabled by a profile change stop rather than resume later.
 - **LED and sound playback.** One portable controller advances patterns from elapsed time
-  while fetching continues. Alert start/escalation gives three gentle LED pulses; clear fades
-  to off; NoData double-flashes amber every 5 s. The existing raised/escalation sound patterns
-  remain, and clear is one 80 ms, 1,400 Hz chirp. Hardware writes are cached by value.
+  while fetching continues. Only Yellow and Red alert: Partial keeps the LED off and plays no
+  raised sound, and Yellow or Red falling to Partial counts as a clear. Alert start/escalation
+  gives three gentle LED pulses; clear fades to off; NoData double-flashes amber every 5 s. The
+  existing raised/escalation sound patterns remain, and clear is one 80 ms, 1,400 Hz chirp.
+  Hardware writes are cached by value.
 - **Settings and previews.** Authenticated `GET /settings` serves the page,
   `GET /settings/state` reads settings/status, `POST /settings` saves, and
   `POST /settings/preview` auditions submitted draft values without saving. A preview is
@@ -262,7 +267,7 @@ pytest fails while that file is out of date with the encoder.
 ## Testing
 
 The mock server becomes a fake NEPTUN (WebSocket and
-REST, alert phases for home raion red, home oblast yellow, partial, missing `level` and Kyiv
+REST, alert phases for home raion yellow and red, home oblast yellow (Partial), partial, missing `level` and Kyiv
 city, plus small synthetic region files) and a fake Overpass. Scenarios run the whole path: fake
 upstream → the real gateway → the native clock build → PNG frames. `tools/run_scenarios.py`
 writes a gateway config from the scenario's `home` and radii, starts the gateway on a free port

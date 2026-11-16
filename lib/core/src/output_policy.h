@@ -19,7 +19,7 @@ bool valid_output_profile(const OutputProfile& profile);
 bool valid_output_settings(const OutputSettings& settings);
 
 enum class PreviewTarget : uint8_t {
-  Screen, LedPartial, LedYellow, LedRed, LedNoData, LedClear, Raised, Escalated, Cleared
+  Screen, LedYellow, LedRed, LedNoData, LedClear, Raised, Escalated, Cleared
 };
 class OutputSink {
  public:

@@ -10,7 +10,7 @@ namespace core {
 enum class AlertLevel : uint8_t {
   Unknown,  // no valid data
   None,     // no alert at home
-  Partial,  // alerts elsewhere in the home oblast
+  Partial,  // alerts elsewhere in the home oblast; shown, but not alerting
   Yellow,   // threat warning at home
   Red,      // air-raid alert at home
 };

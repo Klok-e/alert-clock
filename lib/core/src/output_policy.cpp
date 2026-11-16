@@ -6,8 +6,8 @@ uint32_t colour(Banner banner) {
   switch (banner) {
     case Banner::Red: return 0x400000;
     case Banner::Yellow: return 0x302000;
-    case Banner::Partial: return 0x200000;
     case Banner::NoData: return 0x180800;
+    case Banner::Partial:  // alerts elsewhere in the oblast keep the LED dark
     case Banner::None: return 0;
   }
   return 0;
@@ -67,9 +67,9 @@ bool OutputController::allowed(Sound sound) const {
 bool OutputController::compatible(Sound sound) const {
   switch (sound) {
     case Sound::AlertRaised:
-      return banner_ == Banner::Partial || banner_ == Banner::Yellow || banner_ == Banner::Red;
+      return banner_ == Banner::Yellow || banner_ == Banner::Red;
     case Sound::AlertEscalated: return banner_ == Banner::Red;
-    case Sound::AlertCleared: return banner_ == Banner::None;
+    case Sound::AlertCleared: return banner_ == Banner::None || banner_ == Banner::Partial;
     case Sound::None: return false;
   }
   return false;
@@ -95,7 +95,7 @@ void OutputController::observe(bool valid, uint16_t minute, Banner banner, Sound
   time_valid_ = valid && minute < 1440;
   minute_ = minute;
   if (banner != banner_) {
-    if (banner == Banner::None) {
+    if (colour(banner) == 0) {
       fade_rgb_ = live_rgb(now);
       animation_ = Animation::Clear;
     } else animation_ = Animation::Steady;
@@ -158,14 +158,13 @@ void OutputController::paint(uint32_t now) {
     const uint32_t elapsed = now - preview_at_;
     switch (preview_target_) {
       case PreviewTarget::Screen: screen = preview_profile_.screen_percent; break;
-      case PreviewTarget::LedPartial: rgb = elapsed < 1800 ? pulse(colour(Banner::Partial), elapsed) : colour(Banner::Partial); break;
       case PreviewTarget::LedYellow: rgb = elapsed < 1800 ? pulse(colour(Banner::Yellow), elapsed) : colour(Banner::Yellow); break;
       case PreviewTarget::LedRed: rgb = elapsed < 1800 ? pulse(colour(Banner::Red), elapsed) : colour(Banner::Red); break;
       case PreviewTarget::LedNoData: rgb = no_data(elapsed); break;
       case PreviewTarget::LedClear: rgb = elapsed < 400 ? scale(colour(Banner::Red), 400 - elapsed, 400) : 0; break;
       default: break;
     }
-    if (preview_target_ >= PreviewTarget::LedPartial && preview_target_ <= PreviewTarget::LedClear)
+    if (preview_target_ >= PreviewTarget::LedYellow && preview_target_ <= PreviewTarget::LedClear)
       rgb = scale(rgb, preview_profile_.led_percent, 100);
   }
   const uint16_t frequency = note(sound_, now - sound_at_);

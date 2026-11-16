@@ -42,6 +42,8 @@ class Gateway:
             raise SystemExit(2)
         if home != self.home:
             log.info("home region: oblast %s, raion %s", home.oblast_key, home.raion_key or "-")
+            if home.raion_key is None and home.oblast_key != regions.KYIV_CITY:
+                log.warning("home is in no raion of NEPTUN's region files: alerts can show only Partial")
         self.home = home
         self._rebuild_basemap(force=True)
 

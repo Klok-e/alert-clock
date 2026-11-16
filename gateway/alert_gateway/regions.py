@@ -58,16 +58,25 @@ def entry_level(entry: dict) -> int:
 
 
 def _home_entries(alerts: dict, home: HomeRegion) -> list[dict]:
-    """The alert entries for home's raion and oblast."""
-    entries = [e for e in alerts.get("raions", []) if home.raion_key and e.get("key") == home.raion_key]
-    return entries + [e for e in alerts.get("oblasts", []) if e.get("key") == home.oblast_key]
+    """The alert entries for the smallest unit home lies in: its raion, or Kyiv city's own entry.
+    An oblast entry does not cover a raion, since an oblast alert can exclude raions; a home
+    outside Kyiv city that lies in no raion therefore has no entries of its own."""
+    if home.raion_key:
+        return [e for e in alerts.get("raions", []) if e.get("key") == home.raion_key]
+    if home.oblast_key == KYIV_CITY:
+        return [e for e in alerts.get("oblasts", []) if e.get("key") == home.oblast_key]
+    return []
 
 
 def alert_level(alerts: dict, home: HomeRegion) -> int:
     levels = [entry_level(e) for e in _home_entries(alerts, home)]
     if levels:
         return max(levels)
-    if home.oblast_key != KYIV_CITY and home.oblast_region and any(e.get("oblast") == home.oblast_region for e in alerts.get("raions", [])):
+    if home.oblast_key == KYIV_CITY:
+        return LEVEL_NONE
+    if any(e.get("key") == home.oblast_key for e in alerts.get("oblasts", [])):
+        return LEVEL_PARTIAL
+    if home.oblast_region and any(e.get("oblast") == home.oblast_region for e in alerts.get("raions", [])):
         return LEVEL_PARTIAL
     return LEVEL_NONE
 

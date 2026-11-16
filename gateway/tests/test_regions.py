@@ -30,21 +30,18 @@ def test_a_raion_alert_elsewhere_in_the_home_oblast_is_partial():
     assert regions.alert_level(alerts, home) == wire.LEVEL_PARTIAL
 
 
-def test_the_more_severe_of_the_home_raion_and_oblast_entries_wins():
+def test_an_oblast_entry_without_the_home_raion_is_partial_with_no_alert_start():
+    # NEPTUN may alert an oblast while excluding some raions: only the home raion's own entry
+    # alerts home, so an earlier, more severe oblast entry neither raises the level nor starts the clock.
     home = regions.resolve_home(mock_server.OBLASTS, mock_server.RAIONS, *mock_server.HOME_VYSHHOROD)
-    alerts = {"raions": [mock_server.entry("вишгородський", "Вишгородський район", "Київська область", "yellow")],
-              "oblasts": [red("київська", "Київська область", "Київська область")]}
-
-    assert regions.alert_level(alerts, home) == wire.LEVEL_RED
-
-
-def test_the_alert_counts_from_the_earliest_home_entry_through_an_escalation():
-    # The raion went yellow at 18:00 and the oblast red at 19:00: the alert is two hours old, not one.
-    home = regions.resolve_home(mock_server.OBLASTS, mock_server.RAIONS, *mock_server.HOME_VYSHHOROD)
+    red_oblast = red("київська", "Київська область", "Київська область")
+    red_oblast["since"] = "2026-11-14T17:00:00Z"
+    oblast_only = {"raions": [], "oblasts": [red_oblast]}
     yellow = mock_server.entry("вишгородський", "Вишгородський район", "Київська область", "yellow")
     yellow["since"] = "2026-11-14T18:00:00.250Z"
-    red_oblast = red("київська", "Київська область", "Київська область")
-    red_oblast["since"] = "2026-11-14T19:00:00Z"
-    alerts = {"raions": [yellow], "oblasts": [red_oblast]}
+    with_raion = {"raions": [yellow], "oblasts": [red_oblast]}
 
-    assert regions.alert_start(alerts, home) == datetime(2026, 11, 14, 18, 0, 0, 250000, timezone.utc).timestamp()
+    assert regions.alert_level(oblast_only, home) == wire.LEVEL_PARTIAL
+    assert regions.alert_start(oblast_only, home) is None
+    assert regions.alert_level(with_raion, home) == wire.LEVEL_YELLOW
+    assert regions.alert_start(with_raion, home) == datetime(2026, 11, 14, 18, 0, 0, 250000, timezone.utc).timestamp()

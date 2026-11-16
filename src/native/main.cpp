@@ -340,7 +340,7 @@ int main(int argc, char** argv) {
       draft.led_percent = preview["led_percent"] | draft.led_percent;
       draft.sound_mask = preview["sound_mask"] | draft.sound_mask;
       const char* target = preview["target"] | "screen";
-      const char* names[] = {"screen", "led_partial", "led_yellow", "led_red", "led_nodata",
+      const char* names[] = {"screen", "led_yellow", "led_red", "led_nodata",
                              "led_clear", "raised", "escalated", "cleared"};
       size_t selected = 0;
       while (selected < sizeof(names) / sizeof(names[0]) && std::strcmp(names[selected], target) != 0) ++selected;
@@ -422,6 +422,10 @@ int main(int argc, char** argv) {
     if (expected["buzzer_off"].is<bool>()) {
       failures += check(step, "buzzer_off", expected["buzzer_off"].as<bool>() ? "yes" : "no",
                         sink.frequency == 0 ? "yes" : "no");
+    }
+    if (expected["led_off"].is<bool>()) {
+      failures += check(step, "led_off", expected["led_off"].as<bool>() ? "yes" : "no",
+                        sink.rgb == 0 ? "yes" : "no");
     }
     if (expected["led_changes_min"].is<int>() && sink.led_changes < expected["led_changes_min"].as<int>()) {
       std::printf("FAIL step %d: LED changed only %d times\n", step, sink.led_changes);

@@ -5,7 +5,6 @@ namespace {
 
 int rank(AlertLevel level) {
   switch (level) {
-    case AlertLevel::Partial:
     case AlertLevel::Yellow:
       return 1;
     case AlertLevel::Red:

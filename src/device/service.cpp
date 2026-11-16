@@ -63,7 +63,7 @@ const form = document.querySelector('#settings');
 const message = document.querySelector('#message');
 const sounds = [['raised', 'Початок тривоги', 1], ['escalated', 'Посилення тривоги', 2], ['cleared', 'Відбій', 4]];
 const targets = [
-  ['screen', 'Яскравість екрана'], ['led_partial', 'LED: тривога в області'],
+  ['screen', 'Яскравість екрана'],
   ['led_yellow', 'LED: загроза'], ['led_red', 'LED: тривога'],
   ['led_nodata', 'LED: немає даних'], ['led_clear', 'LED: відбій'],
   ...sounds.map(([key, title]) => [key, 'Звук: ' + title])
@@ -203,7 +203,7 @@ bool parse_minute(const String& text, uint16_t& result) {
 }
 
 bool parse_target(const String& text, core::PreviewTarget& target) {
-  static const char* const names[] = {"screen", "led_partial", "led_yellow", "led_red", "led_nodata",
+  static const char* const names[] = {"screen", "led_yellow", "led_red", "led_nodata",
                                      "led_clear", "raised", "escalated", "cleared"};
   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
     if (text == names[i]) {

@@ -3,7 +3,7 @@
   "start": "2026-11-14T19:00:00Z",
   "home": [50.85, 30.45],
   "steps": [
-    {"at": 0,      "phase": "oblast_yellow", "expect": {"panel": "clock", "banner": "yellow", "alert_minutes": 9}},
+    {"at": 0,      "phase": "raion_yellow",  "expect": {"panel": "clock", "banner": "yellow", "alert_minutes": 9}},
     {"at": 840,    "phase": "missing_level", "label": "red-minutes", "expect": {"panel": "clock", "banner": "red", "alert_minutes": 23}},
     {"at": 8400,   "phase": "missing_level", "label": "red-hours", "expect": {"panel": "clock", "banner": "red", "alert_minutes": 149}},
     {"at": 8405,   "press": "short",         "label": "red-hours-map", "expect": {"panel": "map", "banner": "red", "alert_minutes": 150}},

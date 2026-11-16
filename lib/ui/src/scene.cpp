@@ -93,7 +93,6 @@ const char kCardFarTitle[] PROGMEM = "Поблизу нічого";
 const char kCardNearestTrack[] PROGMEM = "найближча ціль %d км";
 const char kCardNearestAdvisory[] PROGMEM = "спостереження %d км";
 const char kCardClearTitle[] PROGMEM = "Цілей поблизу немає";
-const char kCardClearDetail[] PROGMEM = "оновлено %s тому";
 const char kMapStale[] PROGMEM = "Дані %s тому";
 
 constexpr size_t kNameBytes = 20;  // the longest weekday or month in UTF-8, plus the terminator
@@ -427,9 +426,8 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
     heading = s.nearest_heading_deg;
     nearest = true;
   } else {
-    format_age(age, sizeof(age), view.threats_age_s);
     flash_copy(title, sizeof(title), kCardClearTitle);
-    flash_format(detail, sizeof(detail), kCardClearDetail, age);
+    detail[0] = '\0';
     title_color = kMuted;
   }
 
@@ -440,6 +438,10 @@ void draw_threat_card(Canvas& c, const ViewModel& view, const Snapshot& s, int32
                        s.nearest_advisory, s.nearest_stale, kCard);
   } else {
     draw_status_badge(c, kLeft + 22, top + kHeight / 2, badge, kCard);
+  }
+  if (detail[0] == '\0') {
+    c.ram_text(title, kLeft + 46, top + kHeight / 2, &kInterTitle, title_color, lgfx::textdatum_t::middle_left);
+    return;
   }
   c.ram_text(title, kLeft + 46, top + 22, &kInterTitle, title_color, lgfx::textdatum_t::baseline_left);
   c.ram_text(detail, kLeft + 46, top + 39, &kInterBody, kMuted, lgfx::textdatum_t::baseline_left);

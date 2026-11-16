@@ -167,9 +167,11 @@ PHASES = {
                   "alerts": QUIET_ALERTS, "stream_raw": '{"type":"snapshot","data":{"threats":[{"id"'},
     "malformed_alerts": {"threats": [], "alerts": {"raions": [None], "oblasts": []}},
     "outage": {"status": 503},
-    # Home in the Vyshhorod raion (HOME_VYSHHOROD).
+    # Home in the Vyshhorod raion (HOME_VYSHHOROD); only its raion's own entry alerts home.
     "oblast_yellow": {"threats": [], "alerts": {"raions": [], "oblasts": [
         FAR_ALERT, entry("київська", "Київська область", "Київська область", "yellow")]}},
+    "raion_yellow": {"threats": [], "alerts": {"raions": [
+        entry("вишгородський", "Вишгородський район", "Київська область", "yellow")], "oblasts": [FAR_ALERT]}},
     "raion_red": {"threats": [track("v_1", "uav", 300, 9, heading=120, home=HOME_VYSHHOROD)],
                   "alerts": {"raions": [entry("вишгородський", "Вишгородський район", "Київська область")],
                              "oblasts": [FAR_ALERT]}},
