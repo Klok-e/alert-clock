@@ -210,13 +210,17 @@ pytest fails while that file is out of date with the encoder.
   raised sound, and Yellow or Red falling to Partial counts as a clear. Alert start/escalation
   gives three gentle LED pulses; clear fades to off; NoData double-flashes amber every 5 s. The
   existing raised/escalation sound patterns remain, and clear is one 80 ms, 1,400 Hz chirp.
-  Hardware writes are cached by value.
+  Hardware writes are cached by value. Patterns also advance between the strips of a screen
+  redraw (about 100 ms), so drawing does not stall them.
 - **Settings and previews.** Authenticated `GET /settings` serves the page,
   `GET /settings/state` reads settings/status, `POST /settings` saves, and
-  `POST /settings/preview` auditions submitted draft values without saving. A preview is
-  capped at 3 s and must finish before a pending real sound plays. The latest real event
-  replaces the pending event; muted or obsolete events are discarded, with profile and alert
-  relevance checked again on completion. Manual sound previews bypass scheduled muting.
+  `POST /settings/preview` auditions submitted draft values without saving. A new preview
+  replaces a running one but not a live sound. An LED preview fades over 300 ms from the shown
+  colour to its pattern's start colour, holds it until 1 s, plays 2.5 s and fades back; other
+  previews are capped at 3 s. A preview must finish before a pending real sound plays. The
+  latest real event replaces the pending event; muted or obsolete events are discarded, with
+  profile and alert relevance checked again on completion. Manual sound previews bypass
+  scheduled muting.
   Save commits before applying settings; an active preview keeps its captured values.
   Safe mode rejects previews.
 - **Storage.** The emulated EEPROM allocation is 86 bytes: gateway `GWY1` bytes 0–67 are

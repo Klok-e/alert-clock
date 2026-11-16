@@ -59,7 +59,9 @@ class OutputController {
   uint32_t sound_at_ = 0;
   uint32_t led_at_ = 0;
   uint32_t preview_at_ = 0;
+  uint32_t fade_at_ = 0;   // start of the LED fade into or out of a preview
   uint32_t fade_rgb_ = 0;
+  uint32_t from_rgb_ = 0;  // shown when an LED preview started or ended; faded out of
   uint32_t rgb_ = UINT32_MAX;
   uint16_t frequency_ = UINT16_MAX;
   uint16_t minute_ = 0;
@@ -73,6 +75,7 @@ class OutputController {
   bool night_ = true;
   bool preview_active_ = false;
   bool preview_yield_ = false;
+  bool returning_ = false;  // fading from the last preview colour back to the live one
 };
 
 }  // namespace core

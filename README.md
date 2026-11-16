@@ -70,10 +70,12 @@ Before time sync, the clock uses the night profile, including startup messages.
 
 Save persists both profiles and the schedule without restarting. Preview tests unsaved values
 without changing alert state or stored settings. Explicit sound previews are audible even
-when the selected sound or night sounds are disabled. One preview runs at a time, for at
-most three seconds. Live events continue to arrive; after the preview, the clock restores
-its current status and plays only a still-relevant, enabled pending sound. Previews are
-unavailable in safe mode.
+when the selected sound or night sounds are disabled. One preview runs at a time; starting
+another replaces it. An LED preview fades from the current colour to the one its pattern
+starts from (off, or alert red for the all-clear) and holds it until a second has passed,
+plays for 2.5 s and fades back; other previews last at most three seconds. Live events
+continue to arrive; after the preview, the clock restores its current status and plays only
+a still-relevant, enabled pending sound. Previews are unavailable in safe mode.
 
 The LED pulses on alert start or escalation, then holds its status colour; it fades off on
 clear and double-flashes amber every five seconds for missing data. Raised and escalation

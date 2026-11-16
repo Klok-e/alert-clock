@@ -37,7 +37,6 @@ void test_preview_finishes_and_replays_only_latest_permitted_live_event() {
   out.observe(false, 0, Banner::None, Sound::None, 0);
   TEST_ASSERT_TRUE(out.preview(OutputProfile{}, PreviewTarget::Raised, 10));
   TEST_ASSERT_EQUAL_UINT16(2730, sink.hz);
-  TEST_ASSERT_FALSE(out.preview(OutputProfile{}, PreviewTarget::Screen, 11));
   out.configure(OutputSettings{}, 15);
   TEST_ASSERT_EQUAL_UINT16(2730, sink.hz);
   out.observe(false, 0, Banner::Red, Sound::AlertRaised, 20);
@@ -62,6 +61,34 @@ void test_preview_finishes_and_replays_only_latest_permitted_live_event() {
   TEST_ASSERT_EQUAL_UINT16(1400, sink.hz);
   out.update(7580);
   TEST_ASSERT_FALSE(out.sound_busy());
+}
+void test_led_preview_fades_into_its_start_colour_replaces_and_fades_back() {
+  Sink sink; OutputController out(sink);
+  out.observe(true, 720, Banner::Red, Sound::None, 0);
+  TEST_ASSERT_EQUAL_HEX32(0x400000, sink.rgb);
+  // The alert preview starts from off: the live red fades out over 300 ms, then holds.
+  TEST_ASSERT_TRUE(out.preview(OutputProfile{}, PreviewTarget::LedRed, 100));
+  out.update(250); TEST_ASSERT_EQUAL_HEX32(0x200000, sink.rgb);
+  out.update(500); TEST_ASSERT_EQUAL_HEX32(0, sink.rgb);
+  // A new preview replaces it at once; the clear preview starts from alert red.
+  TEST_ASSERT_TRUE(out.preview(OutputProfile{}, PreviewTarget::LedClear, 600));
+  out.update(750); TEST_ASSERT_EQUAL_HEX32(0x200000, sink.rgb);
+  out.update(1500); TEST_ASSERT_EQUAL_HEX32(0x400000, sink.rgb);
+  out.update(1800); TEST_ASSERT_EQUAL_HEX32(0x200000, sink.rgb);  // 1 s lead-in, then the fade
+  out.update(4000);
+  TEST_ASSERT_TRUE(out.preview_busy());
+  TEST_ASSERT_EQUAL_HEX32(0, sink.rgb);
+  // 3.5 s after the replacing preview began, the LED fades back to the live colour.
+  out.update(4100); TEST_ASSERT_FALSE(out.preview_busy());
+  out.update(4250); TEST_ASSERT_EQUAL_HEX32(0x200000, sink.rgb);
+  out.update(4400); TEST_ASSERT_EQUAL_HEX32(0x400000, sink.rgb);
+  // A screen preview replacing an LED preview fades the LED back too.
+  out.gateway_advanced();
+  TEST_ASSERT_TRUE(out.preview(OutputProfile{}, PreviewTarget::LedYellow, 5000));
+  out.update(5500); TEST_ASSERT_EQUAL_HEX32(0, sink.rgb);
+  TEST_ASSERT_TRUE(out.preview(OutputProfile{}, PreviewTarget::Screen, 5600));
+  out.update(5750); TEST_ASSERT_EQUAL_HEX32(0x200000, sink.rgb);
+  out.update(5900); TEST_ASSERT_EQUAL_HEX32(0x400000, sink.rgb);
 }
 void test_muted_new_event_and_settings_save_do_not_resurrect_old_alerts() {
   Sink sink; OutputController out(sink); OutputSettings settings;
@@ -131,6 +158,7 @@ int main() {
   RUN_TEST(test_automatic_sound_stops_when_live_state_invalidates_it);
   RUN_TEST(test_profiles_apply_at_boundaries_and_stop_automatic_sound);
   RUN_TEST(test_preview_finishes_and_replays_only_latest_permitted_live_event);
+  RUN_TEST(test_led_preview_fades_into_its_start_colour_replaces_and_fades_back);
   RUN_TEST(test_muted_new_event_and_settings_save_do_not_resurrect_old_alerts);
   RUN_TEST(test_animations_and_sound_deadlines_survive_wrap_and_late_updates);
   return UNITY_END();

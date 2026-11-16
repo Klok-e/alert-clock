@@ -195,7 +195,8 @@ void loop() {
       notice_done = true;
     }
     view.notice = !notice_done;
-    ui::render(display, band, view);
+    // A frame takes about 100 ms; LED and sound patterns advance between its strips.
+    ui::render(display, band, view, [] { output_controller.update(millis()); });
   }
   output_controller.update(millis());
 }

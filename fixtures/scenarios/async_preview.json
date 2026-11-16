@@ -6,7 +6,7 @@
     {"at": 1, "label": "time-synced", "expect": {"screen_percent": 80, "night": false, "sound": "none"}},
     {"at": 30, "phase": "drones_near", "network": "slow_snapshot", "preview": {"target": "screen", "screen_percent": 27}, "run_ms": 4500, "expect": {"banner": "yellow", "sound": "raised", "screen_percent_seen": 27, "screen_percent": 80, "preview_busy": false, "buzzer_hz_seen": 2730, "buzzer_started_min_ms": 3000, "buzzer_started_max_ms": 3200, "buzzer_off": true, "tick_ms_max": 100}},
     {"at": 7200, "phase": "quiet", "run_ms": 500, "expect": {"night": true, "sound": "cleared", "buzzer_off": true}},
-    {"at": 7230, "phase": "alert_red", "preview": {"target": "led_red", "led_percent": 75}, "run_ms": 3200, "expect": {"night": true, "sound": "raised", "preview_busy": false, "buzzer_hz_absent": 2730, "buzzer_off": true, "led_changes_min": 10}},
+    {"at": 7230, "phase": "alert_red", "preview": {"target": "led_red", "led_percent": 75}, "run_ms": 3700, "expect": {"night": true, "sound": "raised", "preview_busy": false, "buzzer_hz_absent": 2730, "buzzer_off": true, "led_changes_min": 10}},
     {"at": 46800, "label": "day-without-muted-replay", "run_ms": 100, "expect": {"night": false, "sound": "none", "buzzer_hz_absent": 2730, "buzzer_off": true}}
   ]
 }

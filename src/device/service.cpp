@@ -79,14 +79,14 @@ for (const [key, title] of [['day', 'День'], ['night', 'Ніч']]) {
     + `</select></label><button type="button" data-preview="${key}" disabled>Перевірити</button>`;
   document.querySelector('#profiles').append(fieldset);
 }
-let pending = false, polling = false, loaded = false;
+let pending = false, loaded = false;
 function soundMask(profile) {
   return sounds.reduce((mask, [key, , bit]) =>
     mask | (document.getElementById(profile + '_' + key).checked ? bit : 0), 0);
 }
-function previewButtons(busy) {
+function previewButtons(unavailable) {
   document.querySelectorAll('[data-preview]').forEach(button => {
-    button.disabled = !loaded || pending || busy;
+    button.disabled = !loaded || pending || unavailable;
   });
 }
 async function state(fill = false) {
@@ -108,20 +108,12 @@ async function state(fill = false) {
   document.querySelector('#profile').textContent = settings.safe_mode
     ? 'Режим відновлення: перевірки недоступні.'
     : 'Зараз діє ' + (settings.active_profile === 'night' ? 'нічний' : 'денний') + ' режим.';
-  previewButtons(settings.preview_busy || settings.safe_mode);
-  if (settings.preview_busy && !polling) {
-    polling = true;
-    setTimeout(async () => {
-      polling = false;
-      try { await state(); }
-      catch (error) { message.textContent = error.message; previewButtons(false); }
-    }, 1000);
-  }
+  previewButtons(settings.safe_mode);
 }
 async function post(url, data) {
   const response = await fetch(url, {method: 'POST', body: new URLSearchParams(data)});
   if (!response.ok) {
-    throw Error(response.status === 409 ? 'Зачекайте завершення поточного сигналу або перевірки.'
+    throw Error(response.status === 409 ? 'Зачекайте завершення поточного сигналу.'
       : response.status === 400 ? 'Перевірте значення та нічний розклад.'
       : 'Не вдалося зберегти або застосувати налаштування.');
   }

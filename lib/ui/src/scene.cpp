@@ -761,11 +761,13 @@ void draw_scene(lgfx::LovyanGFX& g, int16_t top, const ViewModel& view) {
   draw_credit(canvas);
 }
 
-void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const ViewModel& view) {
+void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const ViewModel& view,
+            void (*between_bands)()) {
   target.startWrite();
   for (int16_t top = 0; top < kSize; top = static_cast<int16_t>(top + kBandHeight)) {
     draw_scene(band, top, view);
     band.pushSprite(&target, 0, top);
+    if (between_bands != nullptr) between_bands();
   }
   target.endWrite();
 }

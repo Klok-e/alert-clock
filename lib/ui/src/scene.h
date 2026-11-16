@@ -15,7 +15,9 @@ constexpr int16_t kBandHeight = 4;
 void draw_scene(lgfx::LovyanGFX& g, int16_t top, const core::ViewModel& view);
 
 // Composes the frame strip by strip through `band` (kScreenPx x kBandHeight, 16-bit)
-// into `target`: the panel on the clock, a canvas sprite on the PC.
-void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const core::ViewModel& view);
+// into `target`: the panel on the clock, a canvas sprite on the PC. `between_bands`, when given,
+// runs after each strip so time-critical work (LED and sound patterns) keeps its pace.
+void render(lgfx::LovyanGFX& target, lgfx::LGFX_Sprite& band, const core::ViewModel& view,
+            void (*between_bands)() = nullptr);
 
 }  // namespace ui

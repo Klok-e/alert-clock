@@ -17,6 +17,20 @@ uint32_t scale(uint32_t rgb, uint32_t numerator, uint32_t denominator) {
          (((rgb >> 8 & 255) * numerator / denominator) << 8) |
          ((rgb & 255) * numerator / denominator);
 }
+// Blends from `from` towards `to`; n/d is the share of `to`.
+uint32_t mix(uint32_t from, uint32_t to, uint32_t n, uint32_t d) {
+  uint32_t out = 0;
+  for (uint32_t shift = 0; shift <= 16; shift += 8) {
+    const int32_t a = static_cast<int32_t>(from >> shift & 255);
+    const int32_t b = static_cast<int32_t>(to >> shift & 255);
+    out |= static_cast<uint32_t>(a + (b - a) * static_cast<int32_t>(n) / static_cast<int32_t>(d)) << shift;
+  }
+  return out;
+}
+constexpr uint32_t kFadeMs = 300;     // into a preview's lead-in and back to the live colour
+constexpr uint32_t kLeadMs = 1000;    // an LED preview first holds the colour its pattern starts from
+constexpr uint32_t kPatternMs = 2500;
+constexpr uint32_t kScreenPreviewMs = 3000;
 uint32_t pulse(uint32_t rgb, uint32_t elapsed) {
   const uint32_t phase = elapsed % 600;
   if (phase < 250) return scale(rgb, phase, 250);
@@ -44,6 +58,21 @@ uint16_t note(Sound sound, uint32_t elapsed) {
   const uint32_t on = sound == Sound::AlertRaised ? 300 : 150;
   const uint32_t off = sound == Sound::AlertRaised ? 200 : 100;
   return elapsed % (on + off) < on ? 2730 : 0;
+}
+bool led_target(PreviewTarget target) {
+  return target >= PreviewTarget::LedYellow && target <= PreviewTarget::LedClear;
+}
+// The LED pattern of a preview, `elapsed` after its lead-in; at 0 it is the lead-in colour.
+uint32_t preview_rgb(PreviewTarget target, uint32_t elapsed) {
+  switch (target) {
+    case PreviewTarget::LedYellow:
+      return elapsed < 1800 ? pulse(colour(Banner::Yellow), elapsed) : colour(Banner::Yellow);
+    case PreviewTarget::LedRed:
+      return elapsed < 1800 ? pulse(colour(Banner::Red), elapsed) : colour(Banner::Red);
+    case PreviewTarget::LedNoData: return no_data(elapsed);
+    case PreviewTarget::LedClear: return elapsed < 400 ? scale(colour(Banner::Red), 400 - elapsed, 400) : 0;
+    default: return 0;
+  }
 }
 Sound preview_sound(PreviewTarget target) {
   switch (target) {
@@ -125,8 +154,14 @@ uint32_t OutputController::live_rgb(uint32_t now) const {
   return rgb;
 }
 bool OutputController::preview(const OutputProfile& p, PreviewTarget target, uint32_t now) {
-  if (preview_active_ || preview_yield_ || sound_busy() || !valid_output_profile(p) ||
+  // A new preview replaces a running one; a live sound or a just-finished preview's pending
+  // sound comes first.
+  if (preview_yield_ || (sound_busy() && !preview_active_) || !valid_output_profile(p) ||
       static_cast<unsigned>(target) > static_cast<unsigned>(PreviewTarget::Cleared)) return false;
+  // An LED preview replaced by a screen or sound preview fades back to the live colour.
+  returning_ = preview_active_ && led_target(preview_target_) && !led_target(target);
+  from_rgb_ = rgb_ == UINT32_MAX ? 0 : rgb_;
+  fade_at_ = now;
   preview_profile_ = p;
   preview_target_ = target;
   preview_active_ = true;
@@ -138,9 +173,13 @@ bool OutputController::preview(const OutputProfile& p, PreviewTarget target, uin
 void OutputController::update(uint32_t now) {
   if (preview_active_) {
     const Sound selected = preview_sound(preview_target_);
-    const uint32_t limit = selected == Sound::None ? 3000 : duration(selected);
+    const uint32_t limit = selected != Sound::None ? duration(selected)
+        : led_target(preview_target_) ? kLeadMs + kPatternMs : kScreenPreviewMs;
     if (now - preview_at_ >= limit) {
       preview_active_ = false;
+      returning_ = led_target(preview_target_);
+      from_rgb_ = rgb_;
+      fade_at_ = now;
       preview_yield_ = true;
       sound_ = Sound::None;
       enforce_policy();
@@ -154,18 +193,16 @@ void OutputController::update(uint32_t now) {
 void OutputController::paint(uint32_t now) {
   uint8_t screen = profile().screen_percent;
   uint32_t rgb = scale(live_rgb(now), profile().led_percent, 100);
-  if (preview_active_) {
+  const uint32_t faded = now - fade_at_;
+  if (preview_active_ && preview_target_ == PreviewTarget::Screen) screen = preview_profile_.screen_percent;
+  if (preview_active_ && led_target(preview_target_)) {
     const uint32_t elapsed = now - preview_at_;
-    switch (preview_target_) {
-      case PreviewTarget::Screen: screen = preview_profile_.screen_percent; break;
-      case PreviewTarget::LedYellow: rgb = elapsed < 1800 ? pulse(colour(Banner::Yellow), elapsed) : colour(Banner::Yellow); break;
-      case PreviewTarget::LedRed: rgb = elapsed < 1800 ? pulse(colour(Banner::Red), elapsed) : colour(Banner::Red); break;
-      case PreviewTarget::LedNoData: rgb = no_data(elapsed); break;
-      case PreviewTarget::LedClear: rgb = elapsed < 400 ? scale(colour(Banner::Red), 400 - elapsed, 400) : 0; break;
-      default: break;
-    }
-    if (preview_target_ >= PreviewTarget::LedYellow && preview_target_ <= PreviewTarget::LedClear)
-      rgb = scale(rgb, preview_profile_.led_percent, 100);
+    rgb = scale(preview_rgb(preview_target_, elapsed < kLeadMs ? 0 : elapsed - kLeadMs),
+                preview_profile_.led_percent, 100);
+    if (faded < kFadeMs) rgb = mix(from_rgb_, rgb, faded, kFadeMs);
+  } else if (returning_) {
+    if (faded < kFadeMs) rgb = mix(from_rgb_, rgb, faded, kFadeMs);
+    else returning_ = false;
   }
   const uint16_t frequency = note(sound_, now - sound_at_);
   if (screen != screen_) { screen_ = screen; sink_.backlight(screen); }
