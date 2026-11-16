@@ -4,8 +4,8 @@
 
 #include "gfx.h"
 
-// Hardware of the HG V3.2.2 clock, as recovered from the supplier firmware
-// (re-nixie-clock: cpp/vendor/tft-espi-16e3759/User_Setup.h, cpp/src/setup.cpp).
+// Hardware of the HG V3.2.2 clock, as recovered from the supplier firmware (its TFT_eSPI
+// User_Setup.h and setup()).
 namespace board {
 
 constexpr uint8_t kTftSclk = 14;      // HSPI
@@ -22,7 +22,7 @@ constexpr uint8_t kLedPin = 12;       // one WS2812 (GRB, 800 kHz); it is also H
 }  // namespace board
 
 // The supplier's ST7789 porch, power, VCOM and gamma settings (TFT_eSPI ST7789_2_Init.h in
-// re-nixie-clock), in place of LovyanGFX's generic values; LovyanGFX's generic list was not tried
+// the supplier firmware), in place of LovyanGFX's generic values; LovyanGFX's generic list was not tried
 // once SPI mode 3 was in place. COLMOD, MADCTL and INVON are sent by LovyanGFX after this list.
 class Panel_HG322 : public lgfx::Panel_ST7789 {
  protected:

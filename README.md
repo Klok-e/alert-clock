@@ -5,8 +5,8 @@ air-raid alert status for your area, and a small map of drones and missiles near
 home, all in Ukrainian. A Raspberry Pi on the same network (`gateway/`) fetches NEPTUN's
 alerts and tracks and OpenStreetMap's rivers and roads, does the geography, draws the map
 background, and hands the clock a small signed snapshot every 2 s over plain HTTP. The
-hardware facts (pins, display settings) come from the reconstruction of the supplier
-firmware in the sibling `re-nixie-clock` repository.
+hardware facts (pins, display settings) were recovered by disassembling the supplier's
+HG V3.2.2 firmware, which drives the panel with TFT_eSPI's `ST7789_2` setup.
 
 > The map and the alerts are informational. Positions come from aggregated monitoring
 > channels: they are approximate and delayed, and an empty map does not mean you are
