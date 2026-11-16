@@ -1,0 +1,8 @@
+{
+  "role": "the supplier's stock firmware, kept to restore the clock; flash at offset 0",
+  "archive": "HG3.2.2 APP.rar",
+  "archive_member": "SD.bin",
+  "supplier_url": "https://drive.google.com/file/d/1jrFhKkjLNM4ravezX7zOhaCvrdkSgnqv/view",
+  "size": 3457024,
+  "sha256": "709eec3f55eca881a631a2999362376c0f1a2d3a7e72354f395ddfdfef7d0acc"
+}
