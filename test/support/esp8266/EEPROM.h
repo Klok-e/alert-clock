@@ -6,8 +6,8 @@
 #include <cstring>
 
 struct FakeEEPROM {
-  std::array<uint8_t, 88> persisted{};
-  std::array<uint8_t, 88> staged{};
+  std::array<uint8_t, 92> persisted{};
+  std::array<uint8_t, 92> staged{};
   bool commit_ok = true;
   bool available = true;
   size_t size = 0;

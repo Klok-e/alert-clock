@@ -32,7 +32,7 @@ void test_failed_commits_restore_cache_and_staging_before_an_unrelated_save() {
   core::OutputSettings rejected=old; rejected.day.screen_percent=89;
   TEST_ASSERT_FALSE(output_store::save(rejected));
   TEST_ASSERT_EQUAL_UINT8(31,output_store::load().day.screen_percent);
-  TEST_ASSERT_EQUAL_MEMORY(original.data(),EEPROM.staged.data(),86);
+  TEST_ASSERT_EQUAL_MEMORY(original.data(),EEPROM.staged.data(),89);
   EEPROM.commit_ok=true;
   TEST_ASSERT_TRUE(gateway_store::save("accepted"));
   gateway_store::begin();
@@ -47,9 +47,31 @@ void test_failed_commits_restore_cache_and_staging_before_an_unrelated_save() {
   old.night_start=old.night_end;
   TEST_ASSERT_FALSE(output_store::save(old));
 }
+void test_version_1_record_loads_full_volume_and_volume_settings_persist() {
+  // A record saved by firmware before volume existed: day screen 33%, night 23:00-10:00.
+  const uint8_t v1[18]={'O','U','T','1',1, 33,100,7, 5,5,0, 0x64,0x05, 0x58,0x02, 0, 0,0};
+  for (size_t i=0; i<16; ++i) EEPROM.persisted[68+i]=v1[i];
+  const uint16_t crc=crc16(v1,16);
+  EEPROM.persisted[84]=static_cast<uint8_t>(crc); EEPROM.persisted[85]=static_cast<uint8_t>(crc>>8);
+  gateway_store::begin();
+  TEST_ASSERT_EQUAL_UINT8(33,output_store::load().day.screen_percent);
+  TEST_ASSERT_EQUAL_UINT8(100,output_store::load().day.volume_percent);
+  TEST_ASSERT_EQUAL_UINT8(100,output_store::load().night.volume_percent);
+  TEST_ASSERT_TRUE(output_store::load().sound_on);
+  core::OutputSettings settings; settings.day.volume_percent=25; settings.night.volume_percent=60;
+  settings.sound_on=false;
+  TEST_ASSERT_TRUE(output_store::save(settings));
+  gateway_store::begin();
+  TEST_ASSERT_EQUAL_UINT8(25,output_store::load().day.volume_percent);
+  TEST_ASSERT_EQUAL_UINT8(60,output_store::load().night.volume_percent);
+  TEST_ASSERT_FALSE(output_store::load().sound_on);
+  settings.day.volume_percent=0;
+  TEST_ASSERT_FALSE(output_store::save(settings));
+}
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_existing_gateway_survives_output_save_and_corruption_falls_back);
   RUN_TEST(test_failed_commits_restore_cache_and_staging_before_an_unrelated_save);
+  RUN_TEST(test_version_1_record_loads_full_volume_and_volume_settings_persist);
   return UNITY_END();
 }

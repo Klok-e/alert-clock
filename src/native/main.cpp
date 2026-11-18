@@ -54,11 +54,12 @@ class TraceOutputs final : public core::OutputSink {
     screens.insert(percent);
     write("backlight_percent", percent);
   }
-  void buzzer(uint16_t hz) override {
+  void buzzer(uint16_t hz, uint8_t volume_percent) override {
     frequency = hz;
     if (hz != 0 && first_buzzer_ms == UINT32_MAX) first_buzzer_ms = now_ - step_start_;
     frequencies.insert(hz);
     write("buzzer_hz", hz);
+    if (hz != 0) write("buzzer_volume_percent", volume_percent);
   }
   void led(uint8_t red, uint8_t green, uint8_t blue) override {
     ++led_changes;
@@ -339,6 +340,7 @@ int main(int argc, char** argv) {
       draft.screen_percent = preview["screen_percent"] | draft.screen_percent;
       draft.led_percent = preview["led_percent"] | draft.led_percent;
       draft.sound_mask = preview["sound_mask"] | draft.sound_mask;
+      draft.volume_percent = preview["volume_percent"] | draft.volume_percent;
       const char* target = preview["target"] | "screen";
       const char* names[] = {"screen", "led_yellow", "led_red", "led_nodata",
                              "led_clear", "raised", "escalated", "cleared"};

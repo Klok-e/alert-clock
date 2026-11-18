@@ -4,9 +4,10 @@ using namespace core;
 struct Sink final : OutputSink {
   uint8_t screen = 0;
   uint16_t hz = 0;
+  uint8_t volume = 0;
   uint32_t rgb = 0;
   void backlight(uint8_t value) override { screen = value; }
-  void buzzer(uint16_t value) override { hz = value; }
+  void buzzer(uint16_t value, uint8_t percent) override { hz = value; volume = percent; }
   void led(uint8_t r, uint8_t g, uint8_t b) override { rgb = uint32_t(r)<<16 | uint32_t(g)<<8 | b; }
 };
 void setUp() {}
@@ -153,6 +154,31 @@ void test_automatic_sound_stops_when_live_state_invalidates_it() {
     TEST_ASSERT_FALSE(out.sound_busy());
   }
 }
+void test_sound_switch_mutes_live_sounds_and_volume_follows_profile_or_preview() {
+  Sink sink; OutputController out(sink); OutputSettings settings;
+  settings.day.volume_percent = 40;
+  settings.sound_on = false;
+  out.configure(settings, 0);
+  out.observe(true, 720, Banner::Red, Sound::AlertRaised, 10);
+  TEST_ASSERT_FALSE(out.sound_busy());
+  TEST_ASSERT_EQUAL_UINT16(0, sink.hz);
+  // A preview still plays, at the draft volume.
+  TEST_ASSERT_TRUE(out.preview(OutputProfile{80, 100, 7, 15}, PreviewTarget::Raised, 20));
+  TEST_ASSERT_EQUAL_UINT16(2730, sink.hz);
+  TEST_ASSERT_EQUAL_UINT8(15, sink.volume);
+  out.update(2000);
+  out.gateway_advanced();
+  settings.sound_on = true;
+  out.configure(settings, 2001);
+  out.observe(true, 720, Banner::Red, Sound::AlertEscalated, 2002);
+  TEST_ASSERT_EQUAL_UINT16(2730, sink.hz);
+  TEST_ASSERT_EQUAL_UINT8(40, sink.volume);
+  // Switching sound off stops a sound already playing.
+  settings.sound_on = false;
+  out.configure(settings, 2010);
+  TEST_ASSERT_FALSE(out.sound_busy());
+  TEST_ASSERT_EQUAL_UINT16(0, sink.hz);
+}
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_automatic_sound_stops_when_live_state_invalidates_it);
@@ -161,5 +187,6 @@ int main() {
   RUN_TEST(test_led_preview_fades_into_its_start_colour_replaces_and_fades_back);
   RUN_TEST(test_muted_new_event_and_settings_save_do_not_resurrect_old_alerts);
   RUN_TEST(test_animations_and_sound_deadlines_survive_wrap_and_late_updates);
+  RUN_TEST(test_sound_switch_mutes_live_sounds_and_volume_follows_profile_or_preview);
   return UNITY_END();
 }

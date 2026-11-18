@@ -5,7 +5,7 @@
 
 namespace {
 constexpr size_t kGatewayBytes = 68;
-constexpr size_t kOutputBytes = 18;
+constexpr size_t kOutputBytes = 21;
 constexpr size_t kStoreBytes = kGatewayBytes + kOutputBytes;
 constexpr uint32_t kGatewayMagic = 0x47575931;
 char address_cache[gateway_store::kMaxAddress + 1] = {};
@@ -21,8 +21,10 @@ uint16_t crc16(const uint8_t* data, size_t length) {
   }
   return crc;
 }
+// Version 2 adds a volume to each profile and the sound switch; version 1 records (18 bytes,
+// reserved byte 15, CRC at 16) still load with full volume and sound on.
 void encode(const core::OutputSettings& settings, uint8_t (&bytes)[kOutputBytes]) {
-  bytes[0] = 'O'; bytes[1] = 'U'; bytes[2] = 'T'; bytes[3] = '1'; bytes[4] = 1;
+  bytes[0] = 'O'; bytes[1] = 'U'; bytes[2] = 'T'; bytes[3] = '1'; bytes[4] = 2;
   bytes[5] = settings.day.screen_percent;
   bytes[6] = settings.day.led_percent;
   bytes[7] = settings.day.sound_mask;
@@ -34,19 +36,31 @@ void encode(const core::OutputSettings& settings, uint8_t (&bytes)[kOutputBytes]
   bytes[13] = static_cast<uint8_t>(settings.night_end);
   bytes[14] = static_cast<uint8_t>(settings.night_end >> 8);
   bytes[15] = 0;
-  const uint16_t crc = crc16(bytes, 16);
-  bytes[16] = static_cast<uint8_t>(crc);
-  bytes[17] = static_cast<uint8_t>(crc >> 8);
+  bytes[16] = settings.day.volume_percent;
+  bytes[17] = settings.night.volume_percent;
+  bytes[18] = settings.sound_on ? 1 : 0;
+  const uint16_t crc = crc16(bytes, 19);
+  bytes[19] = static_cast<uint8_t>(crc);
+  bytes[20] = static_cast<uint8_t>(crc >> 8);
 }
 bool decode(const uint8_t (&bytes)[kOutputBytes], core::OutputSettings& settings) {
-  if (bytes[0] != 'O' || bytes[1] != 'U' || bytes[2] != 'T' || bytes[3] != '1' ||
-      bytes[4] != 1 || bytes[15] != 0 ||
-      crc16(bytes, 16) != static_cast<uint16_t>(bytes[16] | bytes[17] << 8)) return false;
+  if (bytes[0] != 'O' || bytes[1] != 'U' || bytes[2] != 'T' || bytes[3] != '1' || bytes[15] != 0)
+    return false;
+  const uint8_t version = bytes[4];
+  const size_t crc_at = version == 1 ? 16 : version == 2 ? 19 : 0;
+  if (crc_at == 0 ||
+      crc16(bytes, crc_at) != static_cast<uint16_t>(bytes[crc_at] | bytes[crc_at + 1] << 8)) return false;
   core::OutputSettings candidate;
-  candidate.day = {bytes[5], bytes[6], bytes[7]};
-  candidate.night = {bytes[8], bytes[9], bytes[10]};
+  candidate.day = {bytes[5], bytes[6], bytes[7], 100};
+  candidate.night = {bytes[8], bytes[9], bytes[10], 100};
   candidate.night_start = static_cast<uint16_t>(bytes[11] | bytes[12] << 8);
   candidate.night_end = static_cast<uint16_t>(bytes[13] | bytes[14] << 8);
+  if (version == 2) {
+    if (bytes[18] > 1) return false;
+    candidate.day.volume_percent = bytes[16];
+    candidate.night.volume_percent = bytes[17];
+    candidate.sound_on = bytes[18] == 1;
+  }
   if (!core::valid_output_settings(candidate)) return false;
   settings = candidate;
   return true;

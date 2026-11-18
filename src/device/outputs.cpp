@@ -1,5 +1,6 @@
 #include "outputs.h"
 #include <Arduino.h>
+#include <core_esp8266_waveform.h>
 #include <esp8266_peri.h>
 
 namespace {
@@ -63,9 +64,15 @@ void Outputs::backlight(uint8_t percent) {
   if (percent > 100) percent = 100;
   analogWrite(board::kBacklightPin, 1023 - (1023 * percent) / 100);
 }
-void Outputs::buzzer(uint16_t frequency_hz) {
-  if (frequency_hz != 0) tone(board::kBuzzerPin, frequency_hz);
-  else {
+void Outputs::buzzer(uint16_t frequency_hz, uint8_t volume_percent) {
+  if (frequency_hz != 0) {
+    // tone() always drives a 50% duty cycle; a shorter high time plays the piezo more quietly.
+    const uint32_t period = microsecondsToClockCycles(1000000UL) / frequency_hz;
+    uint32_t high = period * core::buzzer_duty_permille(volume_percent) / 1000U;
+    const uint32_t shortest = microsecondsToClockCycles(2);
+    if (high < shortest) high = shortest;
+    startWaveformClockCycles(board::kBuzzerPin, high, period - high);
+  } else {
     noTone(board::kBuzzerPin);
     digitalWrite(board::kBuzzerPin, LOW);
   }

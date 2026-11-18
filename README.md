@@ -61,16 +61,20 @@ upload and the debug service run, so a bad build can always be replaced over Wi-
 ## Light and sound
 
 Open `/settings` on the clock and sign in as `admin` with the same password used for
-Wi-Fi setup and firmware uploads. Day and night each have screen brightness, LED intensity,
-and separate start, escalation and all-clear sound toggles. LED intensity scales the status
+Wi-Fi setup and firmware uploads. A sound switch silences every automatic sound, day and
+night. Day and night each have screen brightness, LED intensity, buzzer volume (1–100%) and
+separate start, escalation and all-clear sound toggles. Volume shortens the buzzer's pulses
+rather than changing its pitch; the piezo is loudest at 100%. LED intensity scales the status
 colours; 100% retains their normal intensity. The daily schedule uses Kyiv local time and can
 cross midnight. Its default is 23:00–10:00, with a 5% screen, 5% LED and silent automatic
-notifications at night; day defaults are 80%, 100% and all three sounds enabled.
+notifications at night; day defaults are 80%, 100% and all three sounds enabled. Sound is on
+and both volumes are 100% by default.
 Before time sync, the clock uses the night profile, including startup messages.
 
 Save persists both profiles and the schedule without restarting. Preview tests unsaved values
-without changing alert state or stored settings. Explicit sound previews are audible even
-when the selected sound or night sounds are disabled. One preview runs at a time; starting
+without changing alert state or stored settings. Explicit sound previews play at the
+profile's draft volume and are audible even when the sound switch, the selected sound or night
+sounds are off. One preview runs at a time; starting
 another replaces it. An LED preview fades from the current colour to the one its pattern
 starts from (off, or alert red for the all-clear) and holds it until a second has passed,
 plays for 2.5 s and fades back; other previews last at most three seconds. Live events

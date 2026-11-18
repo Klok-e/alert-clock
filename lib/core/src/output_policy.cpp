@@ -84,14 +84,24 @@ Sound preview_sound(PreviewTarget target) {
 }
 }
 bool valid_output_profile(const OutputProfile& p) {
-  return p.screen_percent <= 100 && p.led_percent <= 100 && p.sound_mask <= 7;
+  return p.screen_percent <= 100 && p.led_percent <= 100 && p.sound_mask <= 7 &&
+         p.volume_percent >= 1 && p.volume_percent <= 100;
+}
+uint16_t buzzer_duty_permille(uint8_t volume) {
+  // asin(v) / pi in two-thousandths at v = 0, 0.05, ..., 1 (bytes save RAM), interpolated.
+  static constexpr uint8_t kTable[] = {0, 8, 16, 24, 32, 40, 48, 57, 65, 74, 83,
+                                       93, 102, 113, 123, 135, 148, 162, 178, 199, 250};
+  if (volume >= 100) return 2U * kTable[20];
+  const unsigned index = volume / 5U;
+  const unsigned rest = volume % 5U;
+  return static_cast<uint16_t>(2U * kTable[index] + 2U * (kTable[index + 1] - kTable[index]) * rest / 5U);
 }
 bool valid_output_settings(const OutputSettings& s) {
   return valid_output_profile(s.day) && valid_output_profile(s.night) &&
          s.night_start < 1440 && s.night_end < 1440 && s.night_start != s.night_end;
 }
 bool OutputController::allowed(Sound sound) const {
-  return sound != Sound::None && (profile().sound_mask & (1U << (static_cast<unsigned>(sound) - 1))) != 0;
+  return sound != Sound::None && settings_.sound_on && (profile().sound_mask & (1U << (static_cast<unsigned>(sound) - 1))) != 0;
 }
 bool OutputController::compatible(Sound sound) const {
   switch (sound) {
@@ -205,13 +215,20 @@ void OutputController::paint(uint32_t now) {
     else returning_ = false;
   }
   const uint16_t frequency = note(sound_, now - sound_at_);
+  // A sound preview plays at the draft volume; a live sound that waited for it plays at the live one.
+  const uint8_t volume = preview_active_ && preview_sound(preview_target_) != Sound::None
+      ? preview_profile_.volume_percent : profile().volume_percent;
   if (screen != screen_) { screen_ = screen; sink_.backlight(screen); }
-  if (frequency != frequency_) { frequency_ = frequency; sink_.buzzer(frequency); }
+  if (frequency != frequency_ || (frequency != 0 && volume != volume_)) {
+    frequency_ = frequency;
+    volume_ = volume;
+    sink_.buzzer(frequency, volume);
+  }
   if (rgb != rgb_) {
     rgb_ = rgb;
     sink_.led(static_cast<uint8_t>(rgb >> 16), static_cast<uint8_t>(rgb >> 8), static_cast<uint8_t>(rgb));
   }
 }
-static_assert(sizeof(OutputProfile) == 3, "profiles must remain compact");
+static_assert(sizeof(OutputProfile) == 4, "profiles must remain compact");
 static_assert(sizeof(OutputController) <= 96, "output state exceeds RAM budget");
 }  // namespace core

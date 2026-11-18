@@ -201,9 +201,12 @@ pytest fails while that file is out of date with the encoder.
   content length is known. `last_failure` preserves the latest failed transfer across a
   successful retry. A failed map download leaves the map invalid until the next successful
   retry; the retry interval remains 30 seconds.
-- **Output profiles.** The clock owns its day/night brightness, three sound toggles per
-  profile and an editable daily Kyiv-time schedule. Defaults are day screen 80%, LED 100%,
-  all sounds; night 23:00–10:00, screen/LED 5%, automatic sounds off. Until time sync it uses
+- **Output profiles.** The clock owns a global sound switch, its day/night brightness, buzzer
+  volume, three sound toggles per profile and an editable daily Kyiv-time schedule. Volume
+  1–100% sets the buzzer's duty cycle (asin(v)/π, so the fundamental's amplitude follows v;
+  100% is the 50% duty `tone()` used); sound off mutes automatic sounds, not previews.
+  Defaults are sound on, day screen 80%, LED 100%, all sounds, volume 100%; night
+  23:00–10:00, screen/LED 5%, volume 100%, automatic sounds off. Until time sync it uses
   night settings. Automatic sounds disabled by a profile change stop rather than resume later.
 - **LED and sound playback.** One portable controller advances patterns from elapsed time
   while fetching continues. Only Yellow and Red alert: Partial keeps the LED off and plays no
@@ -223,9 +226,10 @@ pytest fails while that file is out of date with the encoder.
   scheduled muting.
   Save commits before applying settings; an active preview keeps its captured values.
   Safe mode rejects previews.
-- **Storage.** The emulated EEPROM allocation is 86 bytes: gateway `GWY1` bytes 0–67 are
-  preserved, and an explicitly encoded 18-byte versioned/CRC-checked record stores output
-  profiles and schedule. Missing or invalid output records use defaults without writing.
+- **Storage.** The emulated EEPROM allocation is 89 bytes: gateway `GWY1` bytes 0–67 are
+  preserved, and an explicitly encoded 21-byte versioned/CRC-checked record (version 2) stores
+  output profiles, volumes, the sound switch and schedule. A version 1 record (18 bytes, no
+  volumes) still loads, with sound on and full volume. Missing or invalid output records use defaults without writing.
   Failed commits leave live settings unchanged and restore staged bytes so a later unrelated
   save cannot commit a rejected change.
 - **Threat symbols.** The map and nearest-track card distinguish UAVs (delta wing), FPV
